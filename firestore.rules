@@ -1,0 +1,124 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // --- GLOBAL HELPERS ---
+    
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email.matches("(?i)aritzmonasterio@gmail.com");
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- COLLECTION RULES ---
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Matches (Seeded by Admin)
+    match /matches/{matchId} {
+      function isValidMatch(data) {
+        return data.homeTeam is string &&
+               data.awayTeam is string &&
+               data.date is string &&
+               data.phase is string &&
+               (data.status in ['timed', 'live', 'finished']) &&
+               (data.homeScore == null || data.homeScore is int) &&
+               (data.awayScore == null || data.awayScore is int);
+      }
+
+      allow get: if isSignedIn() && isValidId(matchId);
+      allow list: if isSignedIn();
+      allow create, update: if isAdmin() && isValidMatch(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // Scorers (Seeded by Admin)
+    match /scorers/{scorerId} {
+      function isValidScorer(data) {
+        return data.name is string &&
+               data.team is string &&
+               data.photoUrl is string;
+      }
+
+      allow get: if isSignedIn() && isValidId(scorerId);
+      allow list: if isSignedIn();
+      allow create, update: if isAdmin() && isValidScorer(incoming());
+    }
+
+    // Predictions (User Created)
+    match /predictions/{predictionId} {
+      function isValidPrediction(data) {
+        return data.userId == request.auth.uid &&
+               isValidId(data.matchId) &&
+               (data.homeScore is int && data.homeScore >= 0 && data.homeScore <= 30) &&
+               (data.awayScore is int && data.awayScore >= 0 && data.awayScore <= 30) &&
+               (data.updatedAt == request.time || data.updatedAt is timestamp);
+      }
+
+      allow get: if isSignedIn() && (isOwner(existing().userId) || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      
+      allow create: if isSignedIn() && 
+                      isValidId(predictionId) && 
+                      isValidPrediction(incoming()) && 
+                      predictionId == request.auth.uid + "_" + incoming().matchId &&
+                      incoming().keys().hasAll(['userId', 'matchId', 'homeScore', 'awayScore', 'updatedAt']) &&
+                      incoming().keys().size() >= 5;
+                      
+      allow update: if isSignedIn() && 
+                      isValidPrediction(incoming()) && 
+                      isOwner(existing().userId) &&
+                      incoming().userId == existing().userId &&
+                      incoming().matchId == existing().matchId;
+                      
+      allow delete: if isAdmin() || (isSignedIn() && isOwner(existing().userId));
+    }
+
+    // Users (Profiles and Scores)
+    match /users/{userId} {
+      function isValidUser(data) {
+        return (data.username is string && data.username.size() <= 50) &&
+               (data.email is string && data.email.size() <= 100);
+      }
+
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn();
+      
+      // Points can only be updated by Admin logic (Recalculate)
+      // Users can update their profile or metadata (selectedScorerId)
+      allow create: if isSignedIn() && isOwner(userId) && isValidUser(incoming());
+      
+      allow update: if isAdmin() || (
+        isSignedIn() && isOwner(userId) && 
+        incoming().diff(existing()).affectedKeys().hasOnly(['selectedScorerId', 'username', 'updatedAt'])
+      );
+    }
+
+    // Config (Global deadlines)
+    match /config/deadlines {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}

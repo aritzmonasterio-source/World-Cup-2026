@@ -1,0 +1,93 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account information and aggregate points.",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string", "description": "Unique display name." },
+        "email": { "type": "string", "format": "email" },
+        "totalPoints": { "type": "number", "description": "Sum of all points." },
+        "groupPoints": { "type": "number", "description": "Points from group stage predictions." },
+        "knockoutPoints": { "type": "number", "description": "Points from elimination stage results." },
+        "scorerPoints": { "type": "number", "description": "Points from chosen scorer goals." },
+        "finalistPoints": { "type": "number", "description": "Points from finalist predictions." },
+        "selectedScorerId": { "type": "string", "description": "ID of the chosen scorer." }
+      },
+      "required": ["username", "email", "totalPoints"]
+    },
+    "Match": {
+      "title": "Match Result",
+      "description": "Real match data from external API.",
+      "type": "object",
+      "properties": {
+        "homeTeamId": { "type": "string" },
+        "awayTeamId": { "type": "string" },
+        "homeScore": { "type": "number" },
+        "awayScore": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["timed", "live", "finished"] },
+        "channel": { "type": "string" },
+        "phase": { "type": "string", "enum": ["group", "round_of_16", "quarter_final", "semi_final", "final"] },
+        "groupId": { "type": "string" }
+      },
+      "required": ["homeTeamId", "awayTeamId", "date", "status", "phase"]
+    },
+    "Prediction": {
+      "title": "User Prediction",
+      "description": "User's forecast for a specific match.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "matchId": { "type": "string" },
+        "homeScore": { "type": "number" },
+        "awayScore": { "type": "number" },
+        "pointsEarned": { "type": "number" }
+      },
+      "required": ["userId", "matchId", "homeScore", "awayScore"]
+    },
+    "Scorer": {
+      "title": "Golden Boot Candidate",
+      "description": "Available players for selection.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "team": { "type": "string" },
+        "goals": { "type": "number" },
+        "imageUrl": { "type": "string" }
+      },
+      "required": ["name", "team", "goals"]
+    },
+    "Config": {
+      "title": "App Configuration",
+      "description": "Global settings and deadlines.",
+      "type": "object",
+      "properties": {
+        "groupStageDeadline": { "type": "string", "format": "date-time" },
+        "knockoutStageDeadline": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and scores."
+    },
+    "/matches/{matchId}": {
+      "schema": "Match",
+      "description": "Real-time match data."
+    },
+    "/predictions/{predictionId}": {
+      "schema": "Prediction",
+      "description": "User match predictions."
+    },
+    "/scorers/{scorerId}": {
+      "schema": "Scorer",
+      "description": "List of scorers and their current goal counts."
+    },
+    "/config/deadlines": {
+      "schema": "Config",
+      "description": "Global deadlines for prediction editing."
+    }
+  }
+}

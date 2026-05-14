@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-gray: #2E2E2E;
+  --color-brand-gold: #AE9C50;
+  --color-brand-accent: #10b981;
+  --color-brand-black: #1A1A1A;
+  --color-brand-zinc-900: #1a1a1a;
+  --color-brand-zinc-800: #27272a;
+  --color-brand-zinc-700: #3f3f46;
+  --color-brand-zinc-500: #71717a;
+  --color-brand-zinc-400: #a1a1aa;
+  --color-emerald-500: #10b981;
+  
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-brand-gray text-white font-sans antialiased;
+  }
+}
+
+.dimension-card {
+  @apply bg-brand-gray/30 border border-white/5 rounded-xl overflow-hidden backdrop-blur-md;
+}
+
+.dimension-card-accent {
+  @apply bg-brand-gray/50 border border-brand-gold/20 rounded-2xl backdrop-blur-xl;
+}
+
+.dimension-input {
+  @apply bg-black border border-white/20 rounded-lg text-center font-mono font-bold focus:border-brand-gold outline-none transition-all;
+}
+
+.dimension-button-primary {
+  @apply bg-brand-gold text-black font-bold py-4 rounded-lg uppercase tracking-widest text-sm hover:brightness-110 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.text-gold {
+  @apply text-brand-gold;
+}
+
+.bg-gold {
+  @apply bg-brand-gold;
+}
+
