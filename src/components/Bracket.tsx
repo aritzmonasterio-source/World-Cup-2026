@@ -3,7 +3,7 @@ import { CalendarDays, Loader2, Trophy, Tv } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { isSupabaseConfigured } from '../lib/supabase';
 import type { Match } from '../lib/types';
-import { displayTeam } from '../lib/flags';
+import { displayTeam, getFlagUrl } from '../lib/flags';
 import ConfigRequired from './ConfigRequired';
 
 const ROUND_LABELS: Record<number, string> = {
@@ -52,13 +52,13 @@ export default function Bracket() {
       {matches.length === 0 ? (
         <div className="dimension-card-accent p-12 text-center text-brand-zinc-400">Sin eliminatorias cargadas. Lanza la sincronización FIFA desde Admin.</div>
       ) : (
-        <div className="dimension-card-accent p-4 sm:p-8 min-h-[600px] overflow-x-auto no-scrollbar">
-          <div className="flex flex-nowrap gap-5 sm:gap-8 min-w-[980px] py-4 sm:py-8">
+        <div className="dimension-card-accent p-3 sm:p-8 min-h-[600px] overflow-hidden sm:overflow-x-auto no-scrollbar">
+          <div className="grid grid-cols-1 gap-5 py-4 sm:flex sm:flex-nowrap sm:gap-8 sm:min-w-[980px] sm:py-8">
             {Object.entries(byRound).map(([round, roundMatches]) => (
               <BracketColumn key={round} label={ROUND_LABELS[Number(round)] || `Ronda ${round}`} matches={roundMatches} />
             ))}
-            <div className="flex flex-col items-center justify-center gap-8 min-w-[180px]">
-              <Trophy className="w-20 h-20 text-brand-gold mx-auto drop-shadow-[0_0_30px_rgba(209,178,0,0.5)]" />
+            <div className="flex flex-col items-center justify-center gap-4 sm:gap-8 sm:min-w-[180px] rounded-2xl border border-brand-gold/10 bg-black/20 p-6 sm:border-0 sm:bg-transparent sm:p-0">
+              <Trophy className="w-14 h-14 sm:w-20 sm:h-20 text-brand-gold mx-auto drop-shadow-[0_0_30px_rgba(209,178,0,0.5)]" />
               <div className="text-[12px] font-black uppercase tracking-[0.5em] text-white">Trofeo</div>
             </div>
           </div>
@@ -70,7 +70,7 @@ export default function Bracket() {
 
 function BracketColumn({ label, matches }: { label: string; matches: Match[] }) {
   return (
-    <div className="flex flex-col gap-4 min-w-[190px]">
+    <div className="flex flex-col gap-3 sm:gap-4 min-w-0 sm:min-w-[190px]">
       <div className="sticky top-0 z-10 text-center mb-2 rounded-xl border border-white/10 bg-black/40 backdrop-blur px-3 py-3">
         <div className="text-[10px] text-brand-zinc-500 font-black uppercase tracking-[0.2em]">{label}</div>
         <div className="w-8 h-0.5 bg-brand-gold/20 mx-auto mt-2" />
@@ -84,7 +84,7 @@ function BracketNode({ match }: { match: Match }) {
   const isFinished = match.status === 'finished';
 
   return (
-    <div className="p-4 dimension-card bg-black w-44 border-brand-gold/10 relative group transition-all hover:border-brand-gold/30">
+    <div className="p-4 dimension-card bg-black w-full sm:w-44 border-brand-gold/10 relative group transition-all hover:border-brand-gold/30">
       <div className="text-[7px] text-brand-zinc-500 font-black uppercase mb-3 border-b border-white/5 pb-2 tracking-[0.1em] group-hover:text-brand-gold transition-colors">
         <div>Partido {match.match_number || '?'}</div>
         <div className="flex items-center gap-1 mt-1">
@@ -107,9 +107,14 @@ function BracketNode({ match }: { match: Match }) {
 function TeamRow({ name, code, score, winner }: { name: string; code: string | null; score: number | null; winner: boolean }) {
   return (
     <div className="flex items-center justify-between gap-2">
-      <span className={`text-[9px] font-bold truncate uppercase tracking-tighter transition-colors ${winner ? 'text-brand-gold' : 'text-brand-zinc-400 group-hover:text-white'}`}>
-        {displayTeam(name, code)}
-      </span>
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="h-4 w-6 shrink-0 overflow-hidden rounded-[2px] border border-white/10 bg-white/5">
+          <img src={getFlagUrl(name, code)} alt="" className="h-full w-full object-cover scale-125" />
+        </div>
+        <span className={`truncate text-[9px] font-bold uppercase tracking-tighter transition-colors ${winner ? 'text-brand-gold' : 'text-brand-zinc-400 group-hover:text-white'}`}>
+          {displayTeam(name, code)}
+        </span>
+      </div>
       <div className="w-5 h-5 bg-brand-zinc-900 rounded border border-white/5 flex items-center justify-center text-[9px] font-mono font-bold text-brand-zinc-400 shrink-0">
         {score ?? '?'}
       </div>

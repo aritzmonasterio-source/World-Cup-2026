@@ -17,8 +17,23 @@
 }
 
 @layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    min-height: 100%;
+    overflow-x: hidden;
+  }
+
   body {
     @apply bg-brand-gray text-white font-sans antialiased;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
   }
 }
 
@@ -45,4 +60,3 @@
 .bg-gold {
   @apply bg-brand-gold;
 }
-

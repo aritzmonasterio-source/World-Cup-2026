@@ -813,6 +813,8 @@ function KnockoutPickControl({
 }
 
 function TeamSelect({ label, value, teams, locked, onChange }: { label: string; value: string; teams: Team[]; locked: boolean; onChange: (teamId: string) => void }) {
+  const selectedTeam = teams.find((team) => team.id === value);
+
   return (
     <label className="space-y-1">
       <span className="text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">{label}</span>
@@ -825,6 +827,12 @@ function TeamSelect({ label, value, teams, locked, onChange }: { label: string; 
         <option value="">{teams.length ? 'Selecciona equipo' : 'Sin equipos'}</option>
         {teams.map((team) => <option key={team.id} value={team.id}>{displayTeam(team.name, team.code)}</option>)}
       </select>
+      {selectedTeam && (
+        <span className="flex items-center gap-2 rounded-lg border border-white/5 bg-white/[0.03] px-2 py-1 text-[10px] font-black uppercase text-brand-zinc-300">
+          <Flag code={selectedTeam.code} name={selectedTeam.name} />
+          <span className="truncate">{displayTeam(selectedTeam.name, selectedTeam.code)}</span>
+        </span>
+      )}
     </label>
   );
 }
@@ -851,7 +859,10 @@ function GroupStandingCard({ group, rows }: { group: string; rows: PredictedStan
           <div key={row.teamId} className={`grid grid-cols-[28px_1fr_auto] items-center gap-3 rounded-lg border px-3 py-2 ${row.position <= 2 ? 'border-brand-gold/20 bg-brand-gold/5' : 'border-white/5 bg-white/[0.02]'}`}>
             <span className="text-xs font-black text-brand-gold">{row.position}</span>
             <div className="min-w-0">
-              <p className="truncate text-xs font-black uppercase text-white">{displayTeam(row.teamName, row.teamCode)}</p>
+              <div className="flex min-w-0 items-center gap-2">
+                <Flag code={row.teamCode} name={row.teamName} />
+                <p className="truncate text-xs font-black uppercase text-white">{displayTeam(row.teamName, row.teamCode)}</p>
+              </div>
               <p className="text-[9px] text-brand-zinc-500">{row.gf}-{row.ga} · DG {row.gd}</p>
             </div>
             <span className="font-mono text-xs font-black text-brand-zinc-300">{row.pts}</span>
