@@ -1,172 +1,209 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, Tv } from 'lucide-react';
+import { CheckCircle2, Loader2, Medal, Target, Trophy } from 'lucide-react';
 import { motion } from 'motion/react';
-import { supabase } from '../lib/supabase';
-import { isSupabaseConfigured } from '../lib/supabase';
-import type { Match } from '../lib/types';
+import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { displayTeam, getFlagUrl } from '../lib/flags';
-import { formatDateTime } from '../lib/constants';
 import ConfigRequired from './ConfigRequired';
 
+interface PlayerGoal {
+  player_key: string;
+  player_name: string;
+  team_id: string | null;
+  team_name: string | null;
+  team_code: string | null;
+  goals: number;
+  updated_at?: string;
+}
+
+interface MatchGoalEvent {
+  event_key: string;
+  match_id: string;
+  match_number: number | null;
+  player_name: string;
+  team_id: string | null;
+  team_name: string | null;
+  team_code: string | null;
+  minute: number | null;
+  penalty: boolean;
+  own_goal: boolean;
+  updated_at?: string;
+  matches?: {
+    home_team_name: string;
+    away_team_name: string;
+    home_team_code: string | null;
+    away_team_code: string | null;
+    phase: string;
+  };
+}
+
 export default function Live() {
-  const [matches, setMatches] = useState<Match[]>([]);
+  const [goals, setGoals] = useState<PlayerGoal[]>([]);
+  const [events, setEvents] = useState<MatchGoalEvent[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<'all' | 'live'>('all');
+
+  async function loadScorers() {
+    const { data: goalRows } = await supabase
+      .from('player_goals')
+      .select('*')
+      .order('goals', { ascending: false })
+      .order('player_name', { ascending: true });
+
+    const { data: eventRows, error: eventError } = await supabase
+      .from('match_goal_events')
+      .select('*, matches(home_team_name, away_team_name, home_team_code, away_team_code, phase)')
+      .eq('own_goal', false)
+      .order('match_number', { ascending: false })
+      .order('minute', { ascending: false })
+      .limit(20);
+
+    setGoals((goalRows || []) as PlayerGoal[]);
+    setEvents(eventError ? [] : (eventRows || []) as MatchGoalEvent[]);
+    setLoading(false);
+  }
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
       setLoading(false);
       return;
     }
-    let mounted = true;
 
-    supabase.from('matches').select('*').order('kickoff_at', { ascending: true }).then(({ data }) => {
-      if (mounted) {
-        setMatches((data || []) as Match[]);
-        setLoading(false);
-      }
-    });
-
+    loadScorers();
     const channel = supabase
-      .channel('matches-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
-        supabase.from('matches').select('*').order('kickoff_at', { ascending: true }).then(({ data }) => setMatches((data || []) as Match[]));
-      })
+      .channel('scorers-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'player_goals' }, loadScorers)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'match_goal_events' }, loadScorers)
       .subscribe();
 
     return () => {
-      mounted = false;
       supabase.removeChannel(channel);
     };
   }, []);
 
-  const filteredMatches = useMemo(() => {
-    if (filter === 'live') return matches.filter((m) => m.status === 'live');
-    return matches;
-  }, [matches, filter]);
-
-  const matchesByDate = useMemo(() => {
-    const grouped: Record<string, Match[]> = {};
-    filteredMatches.forEach((match) => {
-      const date = new Intl.DateTimeFormat('es-ES', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-        timeZone: 'Europe/Madrid',
-      }).format(new Date(match.kickoff_at));
-      if (!grouped[date]) grouped[date] = [];
-      grouped[date].push(match);
-    });
-    return grouped;
-  }, [filteredMatches]);
+  const leader = goals[0];
+  const totalGoals = useMemo(() => goals.reduce((sum, row) => sum + row.goals, 0), [goals]);
 
   if (loading) return <div className="flex justify-center p-20"><Loader2 className="w-8 h-8 animate-spin text-brand-gold" /></div>;
-  if (!isSupabaseConfigured) return <ConfigRequired title="Directo pendiente de Supabase" />;
+  if (!isSupabaseConfigured) return <ConfigRequired title="Goleadores pendiente de Supabase" />;
 
   return (
-    <div className="space-y-12 pb-20 max-w-5xl mx-auto">
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
-        <h1 className="text-2xl font-black uppercase tracking-tighter italic">Cartelera <span className="text-brand-gold">Mundialista</span></h1>
-        <div className="flex bg-white/5 border border-white/10 p-1 rounded-xl">
-          <button onClick={() => setFilter('all')} className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${filter === 'all' ? 'bg-brand-gold text-black shadow-lg shadow-brand-gold/20' : 'text-brand-zinc-500 hover:text-white'}`}>Todos</button>
-          <button onClick={() => setFilter('live')} className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${filter === 'live' ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'text-brand-zinc-500 hover:text-white'}`}>
-            <div className={`w-1.5 h-1.5 rounded-full ${filter === 'live' ? 'bg-white' : 'bg-red-500'} animate-pulse`} />
-            En directo
-          </button>
+    <div className="space-y-10 pb-20">
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5">
+        <div>
+          <div className="flex items-center gap-3 text-brand-gold">
+            <Target className="w-4 h-4" />
+            <span className="text-[10px] font-black uppercase tracking-[0.3em]">Ranking oficial</span>
+          </div>
+          <h1 className="mt-2 text-3xl font-black uppercase tracking-tighter italic">Goleadores <span className="text-brand-gold">Mundial 2026</span></h1>
+          <p className="mt-2 text-sm text-brand-zinc-400 max-w-2xl">
+            Esta vista recoge los goles reales sincronizados desde FIFA o corregidos por el admin. Sirve como fuente para puntuar el goleador elegido.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <StatPill label="Goles registrados" value={totalGoals} />
+          <StatPill label="Jugadores" value={goals.length} />
         </div>
       </div>
 
-      <div className="space-y-16">
-        {Object.entries(matchesByDate).length === 0 ? (
-          <div className="text-center py-20 bg-white/[0.02] border border-dashed border-white/10 rounded-3xl">
-            <p className="text-brand-zinc-500 font-bold italic uppercase tracking-tighter">No hay partidos para mostrar</p>
+      {leader && (
+        <section className="dimension-card-accent p-6 grid md:grid-cols-[auto_1fr_auto] gap-5 items-center">
+          <div className="h-16 w-16 rounded-2xl border border-brand-gold/20 bg-brand-gold/10 flex items-center justify-center">
+            <Trophy className="w-8 h-8 text-brand-gold" />
+          </div>
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-brand-zinc-500">Líder actual</p>
+            <h2 className="mt-1 text-2xl font-black uppercase tracking-tighter">{leader.player_name}</h2>
+            <p className="mt-1 text-sm text-brand-zinc-400">{displayTeam(leader.team_name || 'Selección por confirmar', leader.team_code)}</p>
+          </div>
+          <div className="text-right">
+            <p className="font-mono text-5xl font-black text-brand-gold">{leader.goals}</p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">goles</p>
+          </div>
+        </section>
+      )}
+
+      <section className="dimension-card overflow-hidden border-brand-gold/10">
+        <div className="grid grid-cols-[56px_1fr_72px] sm:grid-cols-[72px_1fr_160px_90px] items-center gap-3 border-b border-white/10 bg-black/20 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">
+          <span>Pos</span>
+          <span>Jugador</span>
+          <span className="hidden sm:block">Selección</span>
+          <span className="text-right">Goles</span>
+        </div>
+
+        {goals.length === 0 ? (
+          <div className="p-10 text-center">
+            <Medal className="mx-auto mb-4 h-10 w-10 text-brand-gold/60" />
+            <h2 className="text-lg font-black uppercase tracking-tighter">Aún no hay goleadores oficiales</h2>
+            <p className="mt-2 text-sm text-brand-zinc-400">Cuando FIFA publique los eventos de gol o el admin los valide, aparecerán aquí automáticamente.</p>
           </div>
         ) : (
-          Object.entries(matchesByDate).map(([date, dateMatches]) => (
-            <div key={date} className="space-y-8">
-              <div className="flex items-center justify-between border-b border-white/5 pb-2">
-                <h2 className="text-sm font-black text-brand-zinc-400 capitalize tracking-tight">{date}</h2>
+          goals.map((row, index) => (
+            <motion.div
+              key={row.player_key}
+              initial={{ opacity: 0, y: 8 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              className="grid grid-cols-[56px_1fr_72px] sm:grid-cols-[72px_1fr_160px_90px] items-center gap-3 border-b border-white/5 px-4 py-4 last:border-b-0 hover:bg-white/[0.03] transition-colors"
+            >
+              <span className={`text-lg font-black italic ${index < 3 ? 'text-brand-gold' : 'text-brand-zinc-600'}`}>{index + 1}</span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-black uppercase text-white">{row.player_name}</p>
+                <p className="mt-1 sm:hidden text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">{displayTeam(row.team_name || 'Selección', row.team_code)}</p>
               </div>
-              <div className="grid gap-6">
-                {dateMatches.map((match) => <MatchCard key={match.id} match={match} />)}
+              <div className="hidden sm:flex items-center gap-2">
+                <Flag name={row.team_name || 'Selección'} code={row.team_code} />
+                <span className="truncate text-xs font-black uppercase text-brand-zinc-300">{displayTeam(row.team_name || 'Selección', row.team_code)}</span>
               </div>
-            </div>
+              <div className="text-right">
+                <span className="font-mono text-xl font-black text-brand-gold">{row.goals}</span>
+              </div>
+            </motion.div>
           ))
         )}
-      </div>
+      </section>
+
+      {events.length > 0 && (
+        <section className="space-y-4">
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="w-5 h-5 text-brand-gold" />
+            <h2 className="text-lg font-black uppercase tracking-tighter italic">Últimos goles detectados</h2>
+          </div>
+          <div className="grid gap-3">
+            {events.map((event) => (
+              <div key={event.event_key} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 grid sm:grid-cols-[1fr_auto] gap-3">
+                <div className="flex items-center gap-3">
+                  <Flag name={event.team_name || 'Selección'} code={event.team_code} />
+                  <div>
+                    <p className="text-sm font-black uppercase">{event.player_name}</p>
+                    <p className="text-xs text-brand-zinc-500">
+                      {event.matches ? `${displayTeam(event.matches.home_team_name, event.matches.home_team_code)} vs ${displayTeam(event.matches.away_team_name, event.matches.away_team_code)}` : 'Partido por confirmar'}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-brand-gold sm:text-right">
+                  {event.minute ? `${event.minute}'` : 'Minuto pendiente'} {event.penalty ? '· Penalti' : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
 
-function MatchCard({ match }: { match: Match }) {
+function StatPill({ label, value }: { label: string; value: number }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true }}
-      className={`bg-white/5 border rounded-3xl overflow-hidden transition-all group ${match.status === 'live' ? 'border-red-500/30 bg-red-500/[0.02]' : 'border-white/5 hover:border-brand-gold/20'}`}
-    >
-      <div className="p-8 sm:p-12 relative flex flex-col items-center">
-        <div className="absolute top-4 left-1/2 -translate-x-1/2">
-          {match.status === 'live' ? (
-            <span className="px-3 py-1 bg-red-500 text-white text-[8px] font-black uppercase tracking-widest rounded-full animate-pulse shadow-lg shadow-red-500/20">En directo</span>
-          ) : match.status === 'finished' ? (
-            <span className="px-3 py-1 bg-white/10 text-white/40 text-[8px] font-black uppercase tracking-widest rounded-full">Finalizado</span>
-          ) : (
-            <span className="px-3 py-1 bg-white/5 text-brand-zinc-500 text-[8px] font-black uppercase tracking-widest rounded-full">{formatDateTime(match.kickoff_at)}</span>
-          )}
-        </div>
-
-        <div className="flex items-center justify-center gap-8 sm:gap-16 w-full mb-6 mt-4">
-          <TeamBlock name={match.home_team_name} code={match.home_team_code} align="right" />
-          <div className="flex flex-col items-center gap-1 min-w-[100px]">
-            {match.status === 'finished' || match.status === 'live' ? (
-              <div className="flex items-center gap-4">
-                <span className="text-4xl font-black italic text-white">{match.home_score ?? 0}</span>
-                <span className="text-brand-zinc-600 font-bold">:</span>
-                <span className="text-4xl font-black italic text-white">{match.away_score ?? 0}</span>
-              </div>
-            ) : (
-              <div className="text-3xl font-black italic tracking-tighter text-brand-gold">
-                {new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Madrid' }).format(new Date(match.kickoff_at))}
-              </div>
-            )}
-          </div>
-          <TeamBlock name={match.away_team_name} code={match.away_team_code} align="left" />
-        </div>
-
-        <div className="flex flex-col items-center gap-1">
-          <div className="flex items-center gap-3 text-[10px] font-bold text-brand-zinc-500 uppercase tracking-[0.2em]">
-            <span>{match.phase}</span>
-            <span className="text-brand-gold/40">•</span>
-            <span>{match.venue || 'Sede por confirmar'}</span>
-          </div>
-          <div className="flex items-center gap-2 text-[10px] font-black text-brand-gold uppercase tracking-[0.2em] mt-2">
-            <Tv className="w-3.5 h-3.5" />
-            <span>{match.tv_channel_es || 'DAZN / Canal Mediapro'}</span>
-          </div>
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
-function TeamBlock({ name, code, align }: { name: string; code: string | null; align: 'left' | 'right' }) {
-  return (
-    <div className={`flex-1 flex flex-col sm:flex-row items-center gap-6 ${align === 'right' ? 'justify-end text-right' : 'justify-start'}`}>
-      {align === 'left' && <Flag name={name} code={code} />}
-      <span className="hidden sm:block text-lg font-black uppercase tracking-tight text-white">{displayTeam(name, code)}</span>
-      {align === 'right' && <Flag name={name} code={code} />}
-      <span className="sm:hidden text-xs font-black uppercase text-white mt-2">{displayTeam(name, code)}</span>
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-right">
+      <p className="font-mono text-2xl font-black text-brand-gold">{value}</p>
+      <p className="text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">{label}</p>
     </div>
   );
 }
 
 function Flag({ name, code }: { name: string; code: string | null }) {
   return (
-    <div className="w-16 h-10 rounded-lg overflow-hidden border border-white/10 shadow-2xl flex-shrink-0">
-      <img src={getFlagUrl(name, code)} className="w-full h-full object-cover scale-150" alt="" />
+    <div className="h-6 w-9 shrink-0 overflow-hidden rounded-[3px] border border-white/10 bg-white/5">
+      <img src={getFlagUrl(name, code)} className="h-full w-full object-cover scale-125" alt="" />
     </div>
   );
 }

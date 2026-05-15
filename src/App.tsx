@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
-import { Activity, Calendar, LayoutDashboard, Shield, Swords, Table, Trophy, User, Users } from 'lucide-react';
+import { Calendar, Medal, LayoutDashboard, Shield, Swords, Table, Trophy, User, Users } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import Admin from './components/Admin';
 import AuthModal from './components/AuthModal';
@@ -21,6 +21,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showAuth, setShowAuth] = useState(false);
+  const [authRecoveryMode, setAuthRecoveryMode] = useState(false);
   const [selectedCommunityId, setSelectedCommunityId] = useState<CommunityId>(() => {
     const stored = window.localStorage.getItem('wc26_selected_community') as CommunityId | null;
     return stored || DEFAULT_COMMUNITY_ID;
@@ -104,7 +105,11 @@ export default function App() {
     }
 
     supabase.auth.getUser().then(({ data }) => loadProfile(data.user));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setAuthRecoveryMode(true);
+        setShowAuth(true);
+      }
       loadProfile(session?.user || null);
     });
 
@@ -122,7 +127,7 @@ export default function App() {
       { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard },
       { id: 'predictions', label: 'Previsión', icon: Calendar },
       { id: 'ranking', label: 'Ranking', icon: Trophy },
-      { id: 'live', label: 'Directo', icon: Activity },
+      { id: 'live', label: 'Goleadores', icon: Medal },
       { id: 'bracket', label: 'Cuadro', icon: Swords },
       { id: 'standings', label: 'Grupos', icon: Table },
       { id: 'others', label: 'Otros', icon: Users },
@@ -267,7 +272,17 @@ export default function App() {
         </div>
       </nav>
 
-      <AuthModal isOpen={showAuth} selectedCommunityId={selectedCommunityId} onCommunityChange={changeCommunity} onClose={() => setShowAuth(false)} />
+      <AuthModal
+        isOpen={showAuth}
+        selectedCommunityId={selectedCommunityId}
+        forcePasswordRecovery={authRecoveryMode}
+        onCommunityChange={changeCommunity}
+        onRecoveryComplete={() => setAuthRecoveryMode(false)}
+        onClose={() => {
+          setShowAuth(false);
+          setAuthRecoveryMode(false);
+        }}
+      />
     </div>
   );
 }

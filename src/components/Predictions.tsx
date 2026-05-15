@@ -44,7 +44,7 @@ export default function Predictions({
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
-  const [activeFilter, setActiveFilter] = useState<'groups' | 'knockout'>('groups');
+  const [activeFilter, setActiveFilter] = useState<'groups' | 'scorers' | 'knockout'>('groups');
   const [scorerName, setScorerName] = useState('');
   const [scorerTeamId, setScorerTeamId] = useState('');
   const autoSaveTimers = useRef<Record<string, number>>({});
@@ -111,6 +111,7 @@ export default function Predictions({
 
   const matchesByPhase = useMemo(() => {
     const grouped: Record<string, Match[]> = {};
+    if (activeFilter === 'scorers') return grouped;
     const filtered = matches.filter((match) => {
       if (activeFilter === 'groups') return !isKnockoutFixture(match);
       if (activeFilter === 'knockout') return isKnockoutFixture(match);
@@ -142,6 +143,7 @@ export default function Predictions({
 
   const missingGroupPredictionCount = Math.max(groupMatches.length - completedGroupPredictionCount, 0);
   const groupsComplete = groupMatches.length > 0 && missingGroupPredictionCount === 0;
+  const scorerComplete = Boolean(scorerPrediction?.player_name || scorerName.trim());
 
   const predictedStandings = useMemo(() => {
     const table: Record<string, PredictedStandingRow[]> = {};
@@ -421,7 +423,19 @@ export default function Predictions({
         </div>
       )}
 
-      <section className="dimension-card-accent p-6">
+      <section className="grid md:grid-cols-3 gap-3">
+        <PhaseButton active={activeFilter === 'groups'} onClick={() => setActiveFilter('groups')} title="1. Partidos fase 1" date={formatDateTime(GROUP_DEADLINE_ISO)} status={groupsComplete ? 'Completo' : `${completedGroupPredictionCount}/${groupMatches.length || 72}`} />
+        <PhaseButton active={activeFilter === 'scorers'} onClick={() => setActiveFilter('scorers')} title="2. Goleadores" date={formatDateTime(GROUP_DEADLINE_ISO)} status={scorerComplete ? 'Elegido' : 'Pendiente'} />
+        <PhaseButton active={activeFilter === 'knockout'} onClick={() => setActiveFilter('knockout')} title="3. Fase eliminatoria" date={formatDateTime(KNOCKOUT_DEADLINE_ISO)} status="Cuadro" />
+      </section>
+
+      {activeFilter === 'groups' && (
+        <div className="rounded-2xl border border-brand-gold/20 bg-brand-gold/5 p-5 text-sm text-brand-zinc-300">
+          <span className="font-black uppercase tracking-widest text-brand-gold">Fase 1:</span> introduce marcadores de grupos. La clasificación automática aparece al lado en escritorio y debajo en móvil.
+        </div>
+      )}
+
+      {activeFilter === 'scorers' && <section className="dimension-card-accent p-6">
         <div className="flex items-center gap-3 mb-6">
           <Target className="w-5 h-5 text-brand-gold" />
           <h2 className="text-lg font-black uppercase tracking-tighter italic">Tu goleador</h2>
@@ -458,7 +472,7 @@ export default function Predictions({
             Goleador elegido: {scorerPrediction.player_name}
           </p>
         )}
-        <div className="mt-6 grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="mt-6 grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
           {SCORER_CANDIDATES.map((candidate) => {
             const team = teams.find((item) => item.code === candidate.code);
             const selected = scorerName.trim().toLowerCase() === candidate.name.toLowerCase();
@@ -472,7 +486,7 @@ export default function Predictions({
                   setScorerTeamId(team?.id || '');
                   scheduleAutoSave('scorer', () => saveScorer(candidate.name, team?.id || ''));
                 }}
-                className={`group overflow-hidden rounded-xl border text-left transition-all disabled:opacity-40 ${selected ? 'border-brand-gold bg-brand-gold/10' : 'border-white/10 bg-white/[0.03] hover:border-brand-gold/40'}`}
+                className={`group overflow-hidden rounded-xl border text-left transition-all disabled:opacity-40 ${selected ? 'border-brand-gold bg-brand-gold/10 shadow-lg shadow-brand-gold/10' : 'border-white/10 bg-white/[0.03] hover:border-brand-gold/40'}`}
               >
                 <div className="aspect-[4/3] bg-black/40">
                   <img
@@ -483,22 +497,22 @@ export default function Predictions({
                   />
                 </div>
                 <div className="p-3">
-                  <p className="text-xs font-black uppercase leading-tight">{candidate.name}</p>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-xs font-black uppercase leading-tight">{candidate.name}</p>
+                    {selected && <CheckCircle2 className="w-4 h-4 text-brand-gold shrink-0" />}
+                  </div>
                   <p className="mt-1 text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">{candidate.team} · {candidate.position}</p>
+                  <p className="mt-3 text-[10px] leading-relaxed text-brand-zinc-400">{candidate.story}</p>
+                  <p className="mt-2 rounded-lg border border-white/5 bg-black/20 p-2 text-[9px] leading-relaxed text-brand-gold/80">{candidate.projection}</p>
                 </div>
               </button>
             );
           })}
         </div>
         <p className="mt-3 text-[11px] text-brand-zinc-500">Lista orientativa de candidatos destacados. Puedes escribir cualquier otro jugador si prefieres una apuesta propia.</p>
-      </section>
+      </section>}
 
-      <section className="space-y-6">
-        <div className="grid sm:grid-cols-2 gap-3 pb-4 border-b border-white/10">
-          <PhaseButton active={activeFilter === 'groups'} onClick={() => setActiveFilter('groups')} title="Fase 1 - Clasificación" date={formatDateTime(GROUP_DEADLINE_ISO)} />
-          <PhaseButton active={activeFilter === 'knockout'} onClick={() => setActiveFilter('knockout')} title="Fase 2 - Eliminatoria" date={formatDateTime(KNOCKOUT_DEADLINE_ISO)} />
-        </div>
-
+      {activeFilter !== 'scorers' && <section className="space-y-6">
         {activeFilter === 'knockout' && (
           <FinalistsPanel
             teams={selectableTeams}
@@ -632,9 +646,9 @@ export default function Predictions({
             </div>
           ))}
         </div>
-      </section>
+      </section>}
 
-      <section className="space-y-5 md:hidden">
+      {activeFilter === 'groups' && <section className="space-y-5 md:hidden">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <h2 className="text-lg font-black uppercase tracking-tighter italic flex items-center gap-3"><Trophy className="w-5 h-5 text-brand-gold" /> Clasificación prevista automática</h2>
           <span className="text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">Cierra {formatDateTime(GROUP_DEADLINE_ISO)}</span>
@@ -643,7 +657,7 @@ export default function Predictions({
         <div className="grid gap-4">
           {groups.map((group) => <GroupStandingCard key={group} group={group} rows={predictedStandings[group] || []} />)}
         </div>
-      </section>
+      </section>}
 
       <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-xs text-brand-zinc-400">
         La fase de grupos cierra el {formatDateTime(GROUP_DEADLINE_ISO)}. La fase eliminatoria cierra el {formatDateTime(KNOCKOUT_DEADLINE_ISO)}.
@@ -680,11 +694,12 @@ function SaveStatusPill({ status }: { status: SaveStatus }) {
   );
 }
 
-function PhaseButton({ active, onClick, title, date }: { active: boolean; onClick: () => void; title: string; date: string }) {
+function PhaseButton({ active, onClick, title, date, status }: { active: boolean; onClick: () => void; title: string; date: string; status?: string }) {
   return (
     <button onClick={onClick} className={`rounded-xl border p-4 text-left transition-all ${active ? 'border-brand-gold bg-brand-gold/10 shadow-lg shadow-brand-gold/10' : 'border-white/10 bg-white/[0.03] hover:border-white/20'}`}>
       <span className={`block text-sm font-black uppercase tracking-widest ${active ? 'text-brand-gold' : 'text-white'}`}>{title}</span>
       <span className="mt-1 block text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">Cierre: {date}</span>
+      {status && <span className={`mt-3 inline-flex rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-widest ${active ? 'border-brand-gold/30 text-brand-gold' : 'border-white/10 text-brand-zinc-400'}`}>{status}</span>}
     </button>
   );
 }
