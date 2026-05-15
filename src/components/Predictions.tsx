@@ -1,587 +1,907 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, getDocs, setDoc, doc, getDoc, where, serverTimestamp } from 'firebase/firestore';
-import { motion, AnimatePresence } from 'motion/react';
-import { Save, Lock, AlertCircle, Loader2, User, Clock, Tv, ChevronLeft, Trophy, Target, Info, FileDown, CheckCircle2 } from 'lucide-react';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { User } from '@supabase/supabase-js';
+import { AlertCircle, CheckCircle2, ChevronLeft, Clock, Eye, FileDown, Loader2, Lock, Medal, Save, ShieldAlert, Target, Trophy, Tv } from 'lucide-react';
+import { motion } from 'motion/react';
+import { canPlay, supabase } from '../lib/supabase';
+import type { FinalistPrediction, KnockoutPrediction, Match, MatchPrediction, Profile, ScorerPrediction, Team } from '../lib/types';
+import { formatDateTime, GROUP_DEADLINE_ISO, isMatchLocked, KNOCKOUT_DEADLINE_ISO, POINTS } from '../lib/constants';
+import { displayTeam, getFlagUrl } from '../lib/flags';
+import { WORLD_CUP_LOGO_URL, getCommunity, type CommunityId } from '../lib/communities';
+import { SCORER_CANDIDATES } from '../lib/scorerCandidates';
 
-import { getFlagUrl } from '../lib/flags';
+type MatchPredictionMap = Record<string, Partial<MatchPrediction>>;
+type KnockoutPredictionMap = Record<string, Partial<KnockoutPrediction>>;
+type FinalistSlot = 'champion' | 'runner_up' | 'third' | 'fourth';
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+type PredictedStandingRow = {
+  teamId: string;
+  teamName: string;
+  teamCode: string | null;
+  pts: number;
+  gf: number;
+  ga: number;
+  gd: number;
+  position: number;
+};
 
-const DEFAULT_SCORERS = [
-  { id: "s1", name: "Kylian Mbappé", team: "Francia", history: "Bota de Oro 2022", average: "Favorito principal", status: "Estrella", photoUrl: "https://img.asmedia.epimg.net/resizer/v2/G6K7X6W7VREJ5O6X7YVREJ5O6U.jpg?auth=9c3397943d04d8d1e3d3b7e5b4c10a4f5b3a3d5b4c10a4f5b3a3d5b4c10a4f5&width=300&height=300" },
-  { id: "s2", name: "Erling Haaland", team: "Noruega", history: "Máquina de goles", average: "Potencia pura", status: "Candidato", photoUrl: "https://img.asmedia.epimg.net/resizer/v2/H6K7X6W7VREJ5O6X7YVREJ5O6U.jpg?auth=9c3397943d04d8d1e3d3b7e5b4c10a4f5b3a3d5b4c10a4f5b3a3d5b4c10a4f5&width=300&height=300" },
-  { id: "s3", name: "Harry Kane", team: "Inglaterra", history: "Bota de Oro 2018", average: "Especialista", status: "Leyenda", photoUrl: "https://img.asmedia.epimg.net/resizer/v2/I6K7X6W7VREJ5O6X7YVREJ5O6U.jpg?auth=9c3397943d04d8d1e3d3b7e5b4c10a4f5b3a3d5b4c10a4f5b3a3d5b4c10a4f5&width=300&height=300" },
-  { id: "s4", name: "Vinícius Jr.", team: "Brasil", history: "Velocidad pura", average: "Desequilibrio", status: "Estrella", photoUrl: "https://img.asmedia.epimg.net/resizer/v2/J6K7X6W7VREJ5O6X7YVREJ5O6U.jpg?auth=9c3397943d04d8d1e3d3b7e5b4c10a4f5b3a3d5b4c10a4f5b3a3d5b4c10a4f5&width=300&height=300" },
-  { id: "s5", name: "Lionel Messi", team: "Argentina", history: "Campeón Mundial", average: "Genio", status: "Leyenda", photoUrl: "https://img.asmedia.epimg.net/resizer/v2/K6K7X6W7VREJ5O6X7YVREJ5O6U.jpg?auth=9c3397943d04d8d1e3d3b7e5b4c10a4f5b3a3d5b4c10a4f5b3a3d5b4c10a4f5&width=300&height=300" },
-  { id: "s6", name: "Jude Bellingham", team: "Inglaterra", history: "El nuevo ídolo", average: "Llegada letal", status: "Elite", photoUrl: "https://img.asmedia.epimg.net/resizer/v2/L6K7X6W7VREJ5O6X7YVREJ5O6U.jpg?auth=9c3397943d04d8d1e3d3b7e5b4c10a4f5b3a3d5b4c10a4f5b3a3d5b4c10a4f5&width=300&height=300" },
-  { id: "s7", name: "Lamine Yamal", team: "España", history: "Récord Juventud", average: "Talento puro", status: "Promesa", photoUrl: "https://img.asmedia.epimg.net/resizer/v2/M6K7X6W7VREJ5O6X7YVREJ5O6U.jpg?auth=9c3397943d04d8d1e3d3b7e5b4c10a4f5b3a3d5b4c10a4f5b3a3d5b4c10a4f5&width=300&height=300" },
-  { id: "s8", name: "Lautaro Martínez", team: "Argentina", history: "Goleador Serie A", average: "Olfato", status: "Elite", photoUrl: "https://img.asmedia.epimg.net/resizer/v2/N6K7X6W7VREJ5O6X7YVREJ5O6U.jpg?auth=9c3397943d04d8d1e3d3b7e5b4c10a4f5b3a3d5b4c10a4f5b3a3d5b4c10a4f5&width=300&height=300" },
-  { id: "s9", name: "Darwin Núñez", team: "Uruguay", history: "Potencia charrúa", average: "Garra", status: "Elite", photoUrl: "https://img.asmedia.epimg.net/resizer/v2/O6K7X6W7VREJ5O6X7YVREJ5O6U.jpg?auth=9c3397943d04d8d1e3d3b7e5b4c10a4f5b3a3d5b4c10a4f5b3a3d5b4c10a4f5&width=300&height=300" },
-  { id: "s10", name: "Julián Álvarez", team: "Argentina", history: "Ganador de todo", average: "Presión", status: "Elite", photoUrl: "https://img.asmedia.epimg.net/resizer/v2/P6K7X6W7VREJ5O6X7YVREJ5O6U.jpg?auth=9c3397943d04d8d1e3d3b7e5b4c10a4f5b3a3d5b4c10a4f5b3a3d5b4c10a4f5&width=300&height=300" },
-  { id: "s11", name: "Jamal Musiala", team: "Alemania", history: "Magia bávara", average: "Dribling", status: "Estrella", photoUrl: "https://img.asmedia.epimg.net/resizer/v2/Q6K7X6W7VREJ5O6X7YVREJ5O6U.jpg?auth=9c3397943d04d8d1e3d3b7e5b4c10a4f5b3a3d5b4c10a4f5b3a3d5b4c10a4f5&width=300&height=300" },
-  { id: "s12", name: "Florian Wirtz", team: "Alemania", history: "Visión total", average: "Clase", status: "Estrella", photoUrl: "https://img.asmedia.epimg.net/resizer/v2/R6K7X6W7VREJ5O6X7YVREJ5O6U.jpg?auth=9c3397943d04d8d1e3d3b7e5b4c10a4f5b3a3d5b4c10a4f5b3a3d5b4c10a4f5&width=300&height=300" },
-  { id: "s13", name: "Victor Osimhen", team: "Nigeria", history: "Poder africano", average: "Salto", status: "Elite", photoUrl: "https://img.asmedia.epimg.net/resizer/v2/S6K7X6W7VREJ5O6X7YVREJ5O6U.jpg?auth=9c3397943d04d8d1e3d3b7e5b4c10a4f5b3a3d5b4c10a4f5b3a3d5b4c10a4f5&width=300&height=300" },
-  { id: "s14", name: "Rodrygo Goes", team: "Brasil", history: "Mr. Champions", average: "Gol", status: "Estrella", photoUrl: "https://img.asmedia.epimg.net/resizer/v2/T6K7X6W7VREJ5O6X7YVREJ5O6U.jpg?auth=9c3397943d04d8d1e3d3b7e5b4c10a4f5b3a3d5b4c10a4f5b3a3d5b4c10a4f5&width=300&height=300" },
-  { id: "s15", name: "Endrick", team: "Brasil", history: "La nueva joya", average: "Explosividad", status: "Promesa", photoUrl: "https://img.asmedia.epimg.net/resizer/v2/U6K7X6W7VREJ5O6X7YVREJ5O6U.jpg?auth=9c3397943d04d8d1e3d3b7e5b4c10a4f5b3a3d5b4c10a4f5b3a3d5b4c10a4f5&width=300&height=300" },
-];
-
-const DEFAULT_MATCHES = [
-  // JORNADA 1 - INAUGURACIÓN
-  { id: "m_1", homeTeam: "México", awayTeam: "Ecuador", date: "2026-06-11T16:00:00Z", phase: "Grupo A", venue: "Estadio Azteca (CDMX)", channel: "Televisa / TV Azteca" },
-  { id: "m_2", homeTeam: "Team A3", awayTeam: "Team A4", date: "2026-06-11T19:00:00Z", phase: "Grupo A", venue: "Estadio Akron (Guadalajara)", channel: "Sky Sports" },
-  { id: "m_3", homeTeam: "Canadá", awayTeam: "Nigeria", date: "2026-06-12T15:00:00Z", phase: "Grupo B", venue: "BMO Field (Toronto)", channel: "TSN" },
-  { id: "m_4", homeTeam: "USA", awayTeam: "Marruecos", date: "2026-06-12T18:00:00Z", phase: "Grupo D", venue: "SoFi Stadium (Los Ángeles)", channel: "FOX / Telemundo" },
-  
-  // MÁS PARTIDOS REPRESENTATIVOS
-  { id: "m_5", homeTeam: "Argentina", awayTeam: "Francia", date: "2026-06-13T16:00:00Z", phase: "Grupo C", venue: "MetLife Stadium (NY/NJ)", channel: "Mundial TV" },
-  { id: "m_6", homeTeam: "España", awayTeam: "Japón", date: "2026-06-13T19:00:00Z", phase: "Grupo E", venue: "Gillette Stadium (Boston)", channel: "RTVE" },
-  { id: "m_7", homeTeam: "Brasil", awayTeam: "Alemania", date: "2026-06-14T16:00:00Z", phase: "Grupo F", venue: "AT&T Stadium (Dallas)", channel: "Mundial TV" },
-  { id: "m_8", homeTeam: "Inglaterra", awayTeam: "Australia", date: "2026-06-14T19:00:00Z", phase: "Grupo G", venue: "Hard Rock Stadium (Miami)", channel: "BBC" },
-  { id: "m_9", homeTeam: "Portugal", awayTeam: "Corea del Sur", date: "2026-06-15T16:00:00Z", phase: "Grupo H", venue: "Mercedes-Benz Stadium (Atlanta)", channel: "Mundial TV" },
-  { id: "m_10", homeTeam: "Italia", awayTeam: "Uruguay", date: "2026-06-15T19:00:00Z", phase: "Grupo I", venue: "NRG Stadium (Houston)", channel: "RAI" },
-  
-  // SEGUNDA JORNADA INICIO
-  { id: "m_11", homeTeam: "México", awayTeam: "Team A3", date: "2026-06-16T16:00:00Z", phase: "Grupo A", venue: "Estadio Akron (Guadalajara)", channel: "Televisa" },
-  { id: "m_12", homeTeam: "Canadá", awayTeam: "Team B3", date: "2026-06-17T15:00:00Z", phase: "Grupo B", venue: "BC Place (Vancouver)", channel: "TSN" },
-  { id: "m_13", homeTeam: "USA", awayTeam: "Team D3", date: "2026-06-17T18:00:00Z", phase: "Grupo D", venue: "Lumen Field (Seattle)", channel: "FOX" },
-];
-
-export default function Predictions({ user, setShowAuth }: { user: any, setShowAuth: (b: boolean) => void }) {
-  const [matches, setMatches] = useState<any[]>([]);
-  const [predictions, setPredictions] = useState<Record<string, any>>({});
+export default function Predictions({
+  user,
+  profile,
+  communityId,
+  setShowAuth,
+}: {
+  user: User | null;
+  profile: Profile | null;
+  communityId: CommunityId;
+  setShowAuth: (open: boolean) => void;
+}) {
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [matchPredictions, setMatchPredictions] = useState<MatchPredictionMap>({});
+  const [knockoutPredictions, setKnockoutPredictions] = useState<KnockoutPredictionMap>({});
+  const [finalistPrediction, setFinalistPrediction] = useState<Partial<FinalistPrediction> | null>(null);
+  const [scorerPrediction, setScorerPrediction] = useState<Partial<ScorerPrediction> | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [scorers, setScorers] = useState<any[]>([]);
-  const [deadlines, setDeadlines] = useState<any>(null);
-  const [selectedScorerInfo, setSelectedScorerInfo] = useState<any | null>(null);
-  const [isExporting, setIsExporting] = useState(false);
-  const [activeFilter, setActiveFilter] = useState('all');
-  const groupFilterList = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
-  const pdfRef = useRef<HTMLDivElement>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [activeFilter, setActiveFilter] = useState<'groups' | 'knockout'>('groups');
+  const [scorerName, setScorerName] = useState('');
+  const [scorerTeamId, setScorerTeamId] = useState('');
+  const autoSaveTimers = useRef<Record<string, number>>({});
 
-  const matchesByGroup = useMemo(() => {
-    const groups: Record<string, any[]> = {};
-    const sorted = [...matches].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    
-    sorted.forEach(m => {
-      const g = m.phase || 'Otros';
-      if (activeFilter !== 'all' && activeFilter !== 'knockout' && !g.includes(activeFilter)) return;
-      if (activeFilter === 'knockout' && g.toLowerCase().includes('grupo')) return;
-      
-      if (!groups[g]) groups[g] = [];
-      groups[g].push(m);
-    });
-    return groups;
-  }, [matches, activeFilter]);
+  const approved = canPlay(profile, user?.email);
+  const canEdit = Boolean(user && approved);
+  const community = getCommunity(communityId);
+  const groups = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
+  const isKnockoutFixture = (match: Match) => {
+    const phase = match.phase?.toLowerCase() || '';
+    return (match.round_number || 0) >= 4 || (!match.group_code && !phase.includes('group') && !phase.includes('grupo'));
+  };
 
   useEffect(() => {
     async function fetchData() {
-      try {
-        setLoading(true);
-        const [mSnap, sSnap] = await Promise.all([
-          getDocs(collection(db, 'matches')),
-          getDocs(collection(db, 'scorers'))
+      setLoading(true);
+      const [{ data: matchRows }, { data: teamRows }] = await Promise.all([
+        supabase.from('matches').select('*').order('kickoff_at', { ascending: true }),
+        supabase.from('teams').select('*').order('group_code', { ascending: true }).order('name', { ascending: true }),
+      ]);
+
+      setMatches((matchRows || []) as Match[]);
+      setTeams((teamRows || []) as Team[]);
+
+      if (user) {
+        const [{ data: predRows }, { data: knockoutRows }, { data: finalistRow }, { data: scorerRow }] = await Promise.all([
+          supabase.from('match_predictions').select('*').eq('user_id', user.id).eq('community_id', communityId),
+          supabase.from('knockout_predictions').select('*').eq('user_id', user.id).eq('community_id', communityId),
+          supabase.from('finalist_predictions').select('*').eq('user_id', user.id).eq('community_id', communityId).maybeSingle(),
+          supabase.from('scorer_predictions').select('*').eq('user_id', user.id).eq('community_id', communityId).maybeSingle(),
         ]);
-        
-        let dData = { groupStageDeadline: "2026-06-11T16:00:00Z", knockoutStageDeadline: "2026-06-28T22:00:00Z" };
-        try {
-          const dSnap = await getDoc(doc(db, 'config', 'deadlines'));
-          if (dSnap.exists()) dData = dSnap.data() as any;
-        } catch (e) {
-          console.warn("Using default deadlines");
+
+        const pMap: MatchPredictionMap = {};
+        (predRows || []).forEach((p: any) => {
+          pMap[p.match_id] = p;
+        });
+        setMatchPredictions(pMap);
+
+        const kMap: KnockoutPredictionMap = {};
+        (knockoutRows || []).forEach((p: any) => {
+          kMap[p.match_id] = p;
+        });
+        setKnockoutPredictions(kMap);
+        setFinalistPrediction((finalistRow as FinalistPrediction | null) || null);
+
+        if (scorerRow) {
+          setScorerPrediction(scorerRow as ScorerPrediction);
+          setScorerName((scorerRow as ScorerPrediction).player_name || '');
+          setScorerTeamId((scorerRow as ScorerPrediction).team_id || '');
         }
-        
-        const fetchedMatches = mSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        const fetchedScorers = sSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        
-        setMatches(fetchedMatches.length > 0 ? fetchedMatches : DEFAULT_MATCHES);
-        setDeadlines(dData);
-        setScorers(fetchedScorers.length > 0 ? fetchedScorers : DEFAULT_SCORERS);
-  
-        if (user?.uid) {
-          const pSnap = await getDocs(query(collection(db, 'predictions'), where('userId', '==', user.uid)));
-          const pMap: Record<string, any> = {};
-          pSnap.docs.forEach(d => {
-            const data = d.data();
-            pMap[data.matchId] = data;
-          });
-          setPredictions(pMap);
-        }
-      } catch (error) {
-        console.error("Fetch data error:", error);
-        setMatches(DEFAULT_MATCHES);
-        setScorers(DEFAULT_SCORERS);
-      } finally {
-        setLoading(false);
+      } else {
+        setMatchPredictions({});
+        setKnockoutPredictions({});
+        setFinalistPrediction(null);
+        setScorerPrediction(null);
+        setScorerName('');
+        setScorerTeamId('');
       }
+      setLoading(false);
     }
+
     fetchData();
-  }, [user]);
+  }, [user, communityId]);
 
-  const handleScoreChange = (matchId: string, side: 'home' | 'away', val: string) => {
-    const score = val === '' ? undefined : parseInt(val);
-    if (val !== '' && isNaN(score as any)) return;
-    setPredictions(prev => ({
+  const matchesByPhase = useMemo(() => {
+    const grouped: Record<string, Match[]> = {};
+    const filtered = matches.filter((match) => {
+      if (activeFilter === 'groups') return !isKnockoutFixture(match);
+      if (activeFilter === 'knockout') return isKnockoutFixture(match);
+      return true;
+    });
+
+    filtered.forEach((match) => {
+      const key = match.group_code ? `Grupo ${match.group_code}` : match.phase;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(match);
+    });
+    return grouped;
+  }, [activeFilter, matches]);
+
+  const selectableTeams = useMemo(
+    () => [...teams].sort((a, b) => displayTeam(a.name, a.code).localeCompare(displayTeam(b.name, b.code), 'es')),
+    [teams],
+  );
+
+  const groupMatches = useMemo(
+    () => matches.filter((match) => !isKnockoutFixture(match) && match.group_code),
+    [matches],
+  );
+
+  const completedGroupPredictionCount = useMemo(
+    () => groupMatches.filter((match) => matchPredictions[match.id]?.home_score !== undefined && matchPredictions[match.id]?.away_score !== undefined).length,
+    [groupMatches, matchPredictions],
+  );
+
+  const missingGroupPredictionCount = Math.max(groupMatches.length - completedGroupPredictionCount, 0);
+  const groupsComplete = groupMatches.length > 0 && missingGroupPredictionCount === 0;
+
+  const predictedStandings = useMemo(() => {
+    const table: Record<string, PredictedStandingRow[]> = {};
+    groups.forEach((group) => {
+      table[group] = calculatePredictedStandings(group, teams, groupMatches, matchPredictions);
+    });
+    return table;
+  }, [groupMatches, matchPredictions, teams]);
+
+  const scheduleAutoSave = (key: string, callback: () => void) => {
+    window.clearTimeout(autoSaveTimers.current[key]);
+    setSaveStatus('saving');
+    autoSaveTimers.current[key] = window.setTimeout(callback, 650);
+  };
+
+  const handleScoreChange = (match: Match, side: 'home' | 'away', value: string) => {
+    const score = value === '' ? undefined : Number(value);
+    if (score !== undefined && (!Number.isInteger(score) || score < 0 || score > 30)) return;
+    const nextPred = {
+      ...matchPredictions[match.id],
+      [side === 'home' ? 'home_score' : 'away_score']: score,
+    };
+    setMatchPredictions((prev) => ({
       ...prev,
-      [matchId]: {
-        ...prev[matchId],
-        homeScore: side === 'home' ? score : (prev[matchId]?.homeScore),
-        awayScore: side === 'away' ? score : (prev[matchId]?.awayScore)
-      }
+      [match.id]: nextPred,
     }));
+    if (nextPred.home_score !== undefined && nextPred.away_score !== undefined) {
+      scheduleAutoSave(`match-${match.id}`, () => saveMatchPrediction(match, nextPred));
+    }
   };
 
-  const savePrediction = async (matchId: string) => {
-    if (!user) {
-      setShowAuth(true);
-      return;
-    }
-    const pred = predictions[matchId];
-    if (pred?.homeScore === undefined || pred?.awayScore === undefined) return;
-
-    setSavingId(matchId);
-    try {
-      const predId = `${user.uid}_${matchId}`;
-      await setDoc(doc(db, 'predictions', predId), {
-        userId: user.uid,
-        matchId,
-        homeScore: pred.homeScore,
-        awayScore: pred.awayScore,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `predictions/${user.uid}_${matchId}`);
-    }
-    setTimeout(() => setSavingId(null), 1000); // Give feedback
-  };
-
-  const downloadPDF = async () => {
-    if (!pdfRef.current) return;
-    setIsExporting(true);
-    try {
-      const canvas = await html2canvas(pdfRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#111111',
-        onclone: (clonedDoc) => {
-          // Fix for Tailwind 4 oklab/oklch colors which crash html2canvas 1.4.1
-          const style = clonedDoc.createElement('style');
-          style.innerHTML = `
-            * { 
-              color-scheme: dark !important;
-            }
-            /* Force basic hex colors in the clone for PDF generation */
-            :root {
-              --color-emerald-500: #10b981 !important;
-              --color-brand-accent: #10b981 !important;
-              --color-brand-gold: #AE9C50 !important;
-            }
-            .text-emerald-500 { color: #10b981 !important; }
-            .bg-emerald-500 { background-color: #10b981 !important; }
-            .text-brand-gold { color: #AE9C50 !important; }
-            .bg-brand-gold { background-color: #AE9C50 !important; }
-          `;
-          clonedDoc.head.appendChild(style);
-
-          // Deep clean all oklab/oklch from stylesheets in the clone
-          const styleTags = clonedDoc.getElementsByTagName('style');
-          for (let i = 0; i < styleTags.length; i++) {
-            let css = styleTags[i].innerHTML;
-            if (css.includes('oklch') || css.includes('oklab') || css.includes('color-mix')) {
-              // Replace these with a generic safe gray or brand color
-              // This prevents the parsing error in html2canvas
-              css = css.replace(/oklch\([^)]+\)/g, 'rgba(113, 113, 122, 1)');
-              css = css.replace(/oklab\([^)]+\)/g, 'rgba(113, 113, 122, 1)');
-              css = css.replace(/color-mix\([^)]+\)/g, 'rgba(113, 113, 122, 1)');
-              styleTags[i].innerHTML = css;
-            }
-          }
-        }
-      });
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-      
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`Mis_Predicciones_Mundial2026_${user.username}.pdf`);
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-    }
-    setIsExporting(false);
-  };
-
-  const saveScorer = async (scorerId: string) => {
+  const saveMatchPrediction = async (match: Match, override?: Partial<MatchPrediction>) => {
     if (!user) return setShowAuth(true);
-    try {
-      await setDoc(doc(db, 'users', user.uid), { selectedScorerId: scorerId }, { merge: true });
-    } catch (error) {
-       handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
+    if (!canEdit || isMatchLocked(match)) return;
+    const pred = override || matchPredictions[match.id];
+    if (pred?.home_score === undefined || pred?.away_score === undefined) return;
+
+    setSavingId(match.id);
+    const { error } = await supabase.from('match_predictions').upsert({
+      user_id: user.id,
+      community_id: communityId,
+      match_id: match.id,
+      home_score: pred.home_score,
+      away_score: pred.away_score,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,community_id,match_id' });
+
+    if (error) alert(error.message);
+    setSaveStatus(error ? 'error' : 'saved');
+    setTimeout(() => setSavingId(null), 700);
+    setTimeout(() => setSaveStatus('idle'), 2200);
+  };
+
+  const updateKnockoutPick = (matchId: string, side: 'home' | 'away', teamId: string) => {
+    const team = teams.find((item) => item.id === teamId);
+    const nextPick = {
+      ...knockoutPredictions[matchId],
+      match_id: matchId,
+      [`predicted_${side}_team_id`]: team?.id || null,
+      [`predicted_${side}_team_name`]: team?.name || null,
+      [`predicted_${side}_team_code`]: team?.code || null,
+    };
+    setKnockoutPredictions((prev) => ({
+      ...prev,
+      [matchId]: nextPick,
+    }));
+    const match = matches.find((item) => item.id === matchId);
+    if (match && nextPick.predicted_home_team_id && nextPick.predicted_away_team_id && nextPick.predicted_home_team_id !== nextPick.predicted_away_team_id) {
+      scheduleAutoSave(`ko-${matchId}`, () => saveKnockoutPrediction(match, nextPick));
     }
   };
 
-  const isLocked = (match: any) => {
-    if (!deadlines) return false; 
-    const now = new Date();
-    const matchDate = new Date(match.date);
-    const stageDeadlineStr = match.phase?.toLowerCase().includes('grupo') 
-      ? deadlines.groupStageDeadline 
-      : deadlines.knockoutStageDeadline;
-    const stageDeadline = stageDeadlineStr ? new Date(stageDeadlineStr) : new Date('2099-01-01');
-    return now > matchDate || now > stageDeadline;
+  const saveKnockoutPrediction = async (match: Match, override?: Partial<KnockoutPrediction>) => {
+    if (!user) return setShowAuth(true);
+    if (!canEdit || new Date() > new Date(KNOCKOUT_DEADLINE_ISO)) return;
+    const pred = override || knockoutPredictions[match.id];
+    if (!pred?.predicted_home_team_id || !pred?.predicted_away_team_id || pred.predicted_home_team_id === pred.predicted_away_team_id) return;
+
+    setSavingId(`ko-${match.id}`);
+    const { error } = await supabase.from('knockout_predictions').upsert({
+      user_id: user.id,
+      community_id: communityId,
+      match_id: match.id,
+      predicted_home_team_id: pred.predicted_home_team_id,
+      predicted_home_team_name: pred.predicted_home_team_name,
+      predicted_home_team_code: pred.predicted_home_team_code,
+      predicted_away_team_id: pred.predicted_away_team_id,
+      predicted_away_team_name: pred.predicted_away_team_name,
+      predicted_away_team_code: pred.predicted_away_team_code,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,community_id,match_id' });
+
+    if (error) alert(error.message);
+    setSaveStatus(error ? 'error' : 'saved');
+    setTimeout(() => setSavingId(null), 700);
+    setTimeout(() => setSaveStatus('idle'), 2200);
   };
 
-  const calculateStandings = (groupMatches: any[], currentPredictions: Record<string, any>) => {
-    const teams: Record<string, { name: string, mp: number, w: number, d: number, l: number, gf: number, ga: number, pts: number }> = {};
-    
-    // Initialize teams from match pairs
-    groupMatches.forEach(m => {
-      [m.homeTeam, m.awayTeam].forEach(t => {
-        if (!teams[t]) teams[t] = { name: t, mp: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
-      });
-    });
-
-    groupMatches.forEach(m => {
-      const pred = currentPredictions[m.id];
-      // Use actual result if available (status === 'finished'), otherwise use prediction
-      const homeScore = m.status === 'finished' ? m.homeScore : pred?.homeScore;
-      const awayScore = m.status === 'finished' ? m.awayScore : pred?.awayScore;
-
-      if (homeScore !== undefined && awayScore !== undefined) {
-        const home = teams[m.homeTeam];
-        const away = teams[m.awayTeam];
-        
-        home.mp++;
-        away.mp++;
-        home.gf += homeScore;
-        home.ga += awayScore;
-        away.gf += awayScore;
-        away.ga += homeScore;
-
-        if (homeScore > awayScore) {
-          home.w++; home.pts += 3;
-          away.l++;
-        } else if (homeScore < awayScore) {
-          away.w++; away.pts += 3;
-          home.l++;
-        } else {
-          home.d++; away.d++;
-          home.pts += 1; away.pts += 1;
-        }
-      }
-    });
-
-    return Object.values(teams).sort((a, b) => {
-      if (b.pts !== a.pts) return b.pts - a.pts;
-      const diffA = a.gf - a.ga;
-      const diffB = b.gf - b.ga;
-      if (diffB !== diffA) return diffB - diffA;
-      return b.gf - a.gf;
-    });
+  const updateFinalistPick = (slot: FinalistSlot, teamId: string) => {
+    const team = teams.find((item) => item.id === teamId);
+    const nextPick = {
+      ...finalistPrediction,
+      [`${slot}_team_id`]: team?.id || null,
+      [`${slot}_team_name`]: team?.name || null,
+      [`${slot}_team_code`]: team?.code || null,
+    };
+    setFinalistPrediction(nextPick);
+    scheduleAutoSave('finalists', () => saveFinalists(nextPick));
   };
 
-  const getPointsEarned = (match: any, pred: any) => {
-    if (match.status !== 'finished' || !pred) return '-';
-    let pts = 0;
-    if (pred.homeScore === match.homeScore && pred.awayScore === match.awayScore) pts = 15;
-    else if (Math.sign(pred.homeScore - pred.awayScore) === Math.sign(match.homeScore - match.awayScore)) pts = 8;
-    return pts;
+  const saveFinalists = async (override?: Partial<FinalistPrediction>) => {
+    if (!user) return setShowAuth(true);
+    if (!canEdit || new Date() > new Date(KNOCKOUT_DEADLINE_ISO)) return;
+    const pick = override || finalistPrediction || {};
+    setSavingId('finalists');
+    const { error } = await supabase.from('finalist_predictions').upsert({
+      user_id: user.id,
+      community_id: communityId,
+      champion_team_id: pick.champion_team_id || null,
+      champion_team_name: pick.champion_team_name || null,
+      champion_team_code: pick.champion_team_code || null,
+      runner_up_team_id: pick.runner_up_team_id || null,
+      runner_up_team_name: pick.runner_up_team_name || null,
+      runner_up_team_code: pick.runner_up_team_code || null,
+      third_team_id: pick.third_team_id || null,
+      third_team_name: pick.third_team_name || null,
+      third_team_code: pick.third_team_code || null,
+      fourth_team_id: pick.fourth_team_id || null,
+      fourth_team_name: pick.fourth_team_name || null,
+      fourth_team_code: pick.fourth_team_code || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,community_id' });
+
+    if (error) alert(error.message);
+    setSaveStatus(error ? 'error' : 'saved');
+    setTimeout(() => setSavingId(null), 700);
+    setTimeout(() => setSaveStatus('idle'), 2200);
   };
+
+  const saveScorer = async (overrideName = scorerName, overrideTeamId = scorerTeamId) => {
+    if (!user) return setShowAuth(true);
+    if (!canEdit || new Date() > new Date(GROUP_DEADLINE_ISO)) return;
+    const team = teams.find((item) => item.id === overrideTeamId);
+    if (!overrideName.trim()) return;
+
+    setSavingId('scorer');
+    const { data, error } = await supabase.from('scorer_predictions').upsert({
+      user_id: user.id,
+      community_id: communityId,
+      player_name: overrideName.trim(),
+      team_id: team?.id || null,
+      team_name: team?.name || null,
+      team_code: team?.code || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,community_id' }).select('*').single();
+
+    if (error) alert(error.message);
+    if (data) setScorerPrediction(data as ScorerPrediction);
+    setSaveStatus(error ? 'error' : 'saved');
+    setTimeout(() => setSavingId(null), 700);
+    setTimeout(() => setSaveStatus('idle'), 2200);
+  };
+
+  const downloadPredictionsPdf = () => {
+    const groupRows = groupMatches.map((match) => {
+      const pred = matchPredictions[match.id];
+      return `<tr><td>${formatDateTime(match.kickoff_at)}</td><td>${displayTeam(match.home_team_name, match.home_team_code)} - ${displayTeam(match.away_team_name, match.away_team_code)}</td><td>${pred?.home_score ?? '-'} - ${pred?.away_score ?? '-'}</td></tr>`;
+    }).join('');
+    const standingRows = groups.map((group) => `
+      <h3>Grupo ${group}</h3>
+      <table><tbody>${(predictedStandings[group] || []).map((row) => `<tr><td>${row.position}</td><td>${displayTeam(row.teamName, row.teamCode)}</td><td>${row.pts} pts</td><td>${row.gf}-${row.ga}</td></tr>`).join('')}</tbody></table>
+    `).join('');
+    const popup = window.open('', '_blank', 'width=900,height=1100');
+    if (!popup) return;
+    popup.document.write(`
+      <html>
+        <head>
+          <title>Pronósticos Mundial 2026</title>
+          <style>
+            body { background:#07131a; color:#f8fafc; font-family:Arial,sans-serif; padding:32px; }
+            .hero { border:1px solid rgba(255,255,255,.16); border-radius:20px; padding:28px; margin-bottom:24px; background:#0a1820; }
+            img { max-height:110px; }
+            h1 { margin:12px 0 4px; font-size:32px; text-transform:uppercase; }
+            h2 { color:#13a180; margin-top:28px; }
+            h3 { color:#e33b2f; margin-bottom:8px; }
+            table { width:100%; border-collapse:collapse; margin:8px 0 18px; background:rgba(255,255,255,.04); }
+            td, th { border-bottom:1px solid rgba(255,255,255,.12); padding:9px; font-size:12px; }
+            .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+            @media print { body { background:white; color:#111; } .hero, table { background:white; } h2 { color:#0b7660; } h3 { color:#b51d18; } }
+          </style>
+        </head>
+        <body>
+          <div class="hero">
+            <img src="${WORLD_CUP_LOGO_URL}" />
+            <h1>Pronósticos Mundial 2026</h1>
+            <p>${profile?.username || user?.email || 'Jugador'} · ${community.name}</p>
+            <p>Generado el ${new Date().toLocaleString('es-ES')}</p>
+          </div>
+          <h2>Marcadores fase de grupos</h2>
+          <table><thead><tr><th>Fecha</th><th>Partido</th><th>Pronóstico</th></tr></thead><tbody>${groupRows}</tbody></table>
+          <h2>Clasificaciones previstas</h2>
+          <div class="grid">${standingRows}</div>
+          <script>window.onload = () => setTimeout(() => window.print(), 250)</script>
+        </body>
+      </html>
+    `);
+    popup.document.close();
+  };
+
+  if (loading) return <div className="flex justify-center p-20"><Loader2 className="w-8 h-8 animate-spin text-brand-gold" /></div>;
 
   return (
-    <div className="space-y-16 pb-20">
-      {/* Header Info */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-6 px-4">
+    <div className="space-y-12 pb-20">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
         <div>
-          <h1 className="text-3xl font-black uppercase tracking-tighter italic">Mis <span className="text-brand-gold">Predicciones</span></h1>
-          <p className="text-brand-zinc-500 text-xs font-bold uppercase tracking-widest mt-2">Mundial 2026 • Panel Oficial de Previsión</p>
+          <h1 className="text-3xl font-black uppercase tracking-tighter italic">Mis <span className="text-brand-gold">Pronósticos</span></h1>
+          <p className="text-brand-zinc-500 text-xs font-bold uppercase tracking-widest mt-2">Calendario FIFA real • visible para todos</p>
         </div>
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={downloadPDF}
-            disabled={isExporting}
-            className="flex items-center gap-3 bg-white/5 border border-white/10 px-5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-brand-gold hover:text-black transition-all group"
-          >
-            {isExporting ? <Loader2 className="w-4 h-4 animate-spin text-brand-gold" /> : <FileDown className="w-4 h-4 group-hover:scale-110 transition-transform" />}
-            Descargar PDF
+        <div className="flex flex-wrap items-center gap-3">
+          <SaveStatusPill status={saveStatus} />
+          <button onClick={downloadPredictionsPdf} className="flex items-center gap-2 rounded-lg border border-brand-gold/20 bg-brand-gold/10 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-brand-gold hover:bg-brand-gold/20 transition-colors">
+            <FileDown className="w-4 h-4" /> PDF
           </button>
           <button onClick={() => window.location.reload()} className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-brand-zinc-400 hover:text-white transition-colors group">
-            <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Inicio
+            <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Recargar
           </button>
         </div>
       </div>
 
-      <div ref={pdfRef} className="space-y-12 p-2 md:p-6 bg-transparent">
-        {/* Selection Scorer (Compact) */}
-        <section className="space-y-6">
-           <div className="flex items-center gap-3">
-             <div className="w-1 h-5 bg-brand-gold rounded-full" />
-             <h2 className="text-lg font-black uppercase tracking-tighter italic">Tu <span className="text-brand-gold">Goleador Estrella</span></h2>
-           </div>
-           <div className="flex gap-4 overflow-x-auto pb-4 no-scrollbar">
-             {scorers.map(s => (
-               <button 
-                 key={s.id}
-                 onClick={() => saveScorer(s.id)}
-                 className={`flex-shrink-0 flex items-center gap-4 px-5 py-3 rounded-2xl border transition-all ${
-                   user?.selectedScorerId === s.id 
-                   ? 'bg-brand-gold text-black border-brand-gold shadow-[0_10px_20px_rgba(209,178,0,0.2)]' 
-                   : 'bg-white/5 border-white/10 text-brand-zinc-400 hover:border-white/20'
-                 }`}
-               >
-                 <div className="w-10 h-10 rounded-xl overflow-hidden border border-white/20">
-                   <img src={s.photoUrl} className="w-full h-full object-cover" alt="" />
-                 </div>
-                 <div className="text-left">
-                   <p className="text-[10px] font-black uppercase tracking-tight leading-none">{s.name}</p>
-                   <p className={`text-[8px] font-bold uppercase tracking-widest mt-1 ${user?.selectedScorerId === s.id ? 'text-black/60' : 'text-brand-zinc-500'}`}>{s.team}</p>
-                 </div>
-                 {user?.selectedScorerId === s.id && <CheckCircle2 className="w-4 h-4 ml-2" />}
-               </button>
-             ))}
-           </div>
-        </section>
+      {matches.length === 0 && (
+        <div className="dimension-card-accent p-8 text-center">
+          <ShieldAlert className="w-10 h-10 text-brand-gold mx-auto mb-4" />
+          <h2 className="text-xl font-black uppercase tracking-tighter mb-2">Falta sincronizar el calendario</h2>
+          <p className="text-brand-zinc-400 text-sm">El admin debe lanzar la sincronización FIFA desde la vista Admin para cargar los 104 partidos.</p>
+        </div>
+      )}
 
-        {/* Filters */}
-        <div className="flex flex-wrap items-center gap-2 pb-4 border-b border-white/10">
-          <button 
-            onClick={() => setActiveFilter('all')}
-            className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeFilter === 'all' ? 'bg-brand-gold text-black shadow-lg shadow-brand-gold/20' : 'bg-white/5 text-brand-zinc-500 hover:text-white'}`}
-          >
-            Todos
-          </button>
-          <button 
-            onClick={() => setActiveFilter('knockout')}
-            className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeFilter === 'knockout' ? 'bg-brand-accent text-white shadow-lg shadow-brand-accent/20' : 'bg-white/5 text-brand-zinc-500 hover:text-white'}`}
-          >
-            Fase Final
-          </button>
-          <div className="w-px h-6 bg-white/10 mx-2 hidden sm:block" />
-          <div className="flex flex-wrap gap-2">
-            {groupFilterList.map(g => (
-              <button 
-                key={g}
-                onClick={() => setActiveFilter(g)}
-                className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeFilter === g ? 'bg-white/20 text-white' : 'bg-white/5 text-brand-zinc-500 hover:text-white'}`}
-              >
-                G{g}
-              </button>
-            ))}
+      {!user && (
+        <ViewerNotice
+          icon={Eye}
+          title="Modo calendario"
+          text="Puedes consultar todos los partidos, horarios y banderas. Crea una cuenta para habilitar los pronósticos en esta misma vista."
+          action="Entrar o registrarme"
+          onClick={() => setShowAuth(true)}
+        />
+      )}
+
+      {user && !approved && (
+        <ViewerNotice
+          icon={Lock}
+          title="Cuenta pendiente"
+          text="Tu cuenta ya existe, pero el admin debe aprobarte para competir oficialmente y guardar pronósticos."
+          action="Ver calendario"
+        />
+      )}
+
+      {user && approved && !groupsComplete && (
+        <div className="dimension-card-accent p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-amber-400/30 bg-amber-400/10">
+          <div className="flex gap-4">
+            <AlertCircle className="w-6 h-6 text-amber-300 shrink-0" />
+            <div>
+              <h2 className="text-sm font-black uppercase tracking-widest text-white">Te faltan {missingGroupPredictionCount} marcadores de fase de grupos</h2>
+              <p className="text-sm text-brand-zinc-300 mt-1">Rellena los resultados y la clasificación prevista se calculará sola. El guardado es automático.</p>
+            </div>
+          </div>
+          <span className="text-[10px] font-black uppercase tracking-widest text-amber-200">{completedGroupPredictionCount}/{groupMatches.length}</span>
+        </div>
+      )}
+
+      {user && approved && groupsComplete && (
+        <div className="dimension-card-accent p-5 flex gap-4 border-emerald-400/30 bg-emerald-500/10">
+          <CheckCircle2 className="w-6 h-6 text-emerald-300 shrink-0" />
+          <div>
+            <h2 className="text-sm font-black uppercase tracking-widest text-white">Fase de grupos completa y guardada en fecha</h2>
+            <p className="text-sm text-brand-zinc-300 mt-1">Todo listo. Ya puedes mirar tu tabla prevista con calma y empezar a disfrutar del juego.</p>
           </div>
         </div>
+      )}
 
-        <div className="space-y-24">
-          {(Object.entries(matchesByGroup) as [string, any[]][]).map(([name, groupMatches]) => {
-            const isKnockout = !name.toLowerCase().includes('grupo');
-            const groupStandings = isKnockout ? [] : calculateStandings(groupMatches, predictions);
-            
+      <section className="dimension-card-accent p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <Target className="w-5 h-5 text-brand-gold" />
+          <h2 className="text-lg font-black uppercase tracking-tighter italic">Tu goleador</h2>
+        </div>
+        <div className="grid md:grid-cols-[1fr_240px_auto] gap-3">
+          <input
+            value={scorerName}
+            onChange={(event) => {
+              setScorerName(event.target.value);
+              scheduleAutoSave('scorer', () => saveScorer(event.target.value, scorerTeamId));
+            }}
+            placeholder="Nombre del jugador"
+            disabled={!canEdit || new Date() > new Date(GROUP_DEADLINE_ISO)}
+            className="bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:border-brand-gold disabled:opacity-40"
+          />
+          <select
+            value={scorerTeamId}
+            onChange={(event) => {
+              setScorerTeamId(event.target.value);
+              scheduleAutoSave('scorer', () => saveScorer(scorerName, event.target.value));
+            }}
+            disabled={!canEdit || new Date() > new Date(GROUP_DEADLINE_ISO)}
+            className="bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:border-brand-gold disabled:opacity-40"
+          >
+            <option value="">Selección opcional</option>
+            {teams.map((team) => <option key={team.id} value={team.id}>{displayTeam(team.name, team.code)}</option>)}
+          </select>
+          <button onClick={user ? () => saveScorer() : () => setShowAuth(true)} disabled={canEdit && savingId === 'scorer'} className="dimension-button-primary px-6 flex items-center justify-center gap-2">
+            {savingId === 'scorer' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {user ? 'Guardar' : 'Entrar'}
+          </button>
+        </div>
+        {scorerPrediction?.player_name && (
+          <p className="text-xs text-brand-gold mt-4 font-bold uppercase tracking-widest">
+            Goleador elegido: {scorerPrediction.player_name}
+          </p>
+        )}
+        <div className="mt-6 grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          {SCORER_CANDIDATES.map((candidate) => {
+            const team = teams.find((item) => item.code === candidate.code);
+            const selected = scorerName.trim().toLowerCase() === candidate.name.toLowerCase();
             return (
-              <div key={name} className="relative group/section">
-                <div className="absolute -left-4 top-0 bottom-0 w-1 bg-brand-gold/20 group-hover/section:bg-brand-gold transition-colors rounded-full" />
-                
-                <div className="flex flex-col lg:flex-row gap-8">
-                  {/* Matches List */}
-                  <div className={`flex-1 space-y-4 ${isKnockout ? 'lg:max-w-4xl' : ''}`}>
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-xl font-black uppercase tracking-[0.2em] italic text-white flex items-center gap-3">
-                        {name} <span className="text-[10px] font-bold tracking-widest text-brand-zinc-500 not-italic border-l border-white/20 pl-3">Partidos</span>
-                      </h3>
-                      {!isKnockout && <span className="text-[9px] font-black uppercase tracking-widest text-brand-gold bg-brand-gold/10 px-3 py-1 rounded-full border border-brand-gold/20">6 Partidos</span>}
-                    </div>
-
-                    <div className="grid gap-2">
-                      {groupMatches.map(match => {
-                        const locked = isLocked(match);
-                        const pred = predictions[match.id];
-                        const earned = getPointsEarned(match, pred);
-                        const isSaving = savingId === match.id;
-
-                        return (
-                          <div key={match.id} className={`grid grid-cols-[1fr_80px_1fr_100px_40px] md:grid-cols-[180px_1fr_100px_1fr_120px_60px] items-center gap-2 p-3 rounded-xl border transition-all ${locked ? 'bg-white/[0.01] border-white/5' : 'bg-white/5 border-white/10 hover:border-brand-gold/30 hover:bg-white/[0.07]'}`}>
-                            
-                            {/* Date (Desktop) */}
-                            <div className="hidden md:flex flex-col">
-                              <span className="text-[9px] font-black uppercase text-brand-zinc-500 leading-none mb-1">{new Date(match.date).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}</span>
-                              <span className="text-xs font-bold text-white/60 tracking-tighter">{new Date(match.date).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}h</span>
-                            </div>
-
-                            {/* Home Team */}
-                            <div className="flex items-center gap-3 justify-end">
-                              <span className="text-[10px] font-black uppercase text-right leading-tight truncate">{match.homeTeam}</span>
-                              <div className="w-8 h-5 rounded-[2px] overflow-hidden border border-white/10 shrink-0">
-                                <img src={getFlagUrl(match.homeTeam)} className="w-full h-full object-cover scale-125" alt="" />
-                              </div>
-                            </div>
-
-                            {/* Score Inputs */}
-                            <div className="flex items-center justify-center gap-1.5">
-                              <input 
-                                type="number" 
-                                min="0"
-                                value={pred?.homeScore ?? ''}
-                                onChange={e => handleScoreChange(match.id, 'home', e.target.value)}
-                                onBlur={() => savePrediction(match.id)}
-                                disabled={locked}
-                                className="w-8 h-9 md:w-10 md:h-10 bg-black/40 border border-brand-gold/30 rounded-lg text-center text-sm font-black focus:border-brand-gold outline-none disabled:opacity-40 transition-all"
-                              />
-                              <span className="text-brand-gold/40 font-black text-xs">-</span>
-                              <input 
-                                type="number" 
-                                min="0"
-                                value={pred?.awayScore ?? ''}
-                                onChange={e => handleScoreChange(match.id, 'away', e.target.value)}
-                                onBlur={() => savePrediction(match.id)}
-                                disabled={locked}
-                                className="w-8 h-9 md:w-10 md:h-10 bg-black/40 border border-brand-gold/30 rounded-lg text-center text-sm font-black focus:border-brand-gold outline-none disabled:opacity-40 transition-all"
-                              />
-                            </div>
-
-                            {/* Away Team */}
-                            <div className="flex items-center gap-3 justify-start">
-                              <div className="w-8 h-5 rounded-[2px] overflow-hidden border border-white/10 shrink-0">
-                                <img src={getFlagUrl(match.awayTeam)} className="w-full h-full object-cover scale-125" alt="" />
-                              </div>
-                              <span className="text-[10px] font-black uppercase tracking-tight leading-tight truncate">{match.awayTeam}</span>
-                            </div>
-
-                            {/* Info (Desktop) / Date (Mobile) */}
-                            <div className="flex flex-col items-center justify-center text-center">
-                              <div className="md:hidden flex flex-col items-end mr-4">
-                                <span className="text-[8px] font-bold text-brand-zinc-500 uppercase">{new Date(match.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}</span>
-                                <span className="text-[9px] font-black text-white/40">{new Date(match.date).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</span>
-                              </div>
-                              <div className="hidden md:block">
-                                <span className="text-[8px] font-black text-brand-gold/50 uppercase tracking-widest block mb-0.5">Televisión</span>
-                                <span className="text-[9px] font-bold text-white/50 truncate max-w-[80px]">{match.channel || 'SKY SPORTS'}</span>
-                              </div>
-                            </div>
-
-                            {/* Points */}
-                            <div className="flex flex-col items-center justify-center">
-                               {isSaving ? (
-                                 <Loader2 className="w-3 h-3 animate-spin text-brand-gold" />
-                               ) : locked ? (
-                                 <div className="flex flex-col items-center">
-                                   <span className="text-[8px] font-black text-brand-gold uppercase leading-none">Pts</span>
-                                   <span className={`text-sm font-black ${earned === 15 ? 'text-emerald-500' : earned === 8 ? 'text-brand-gold' : 'text-brand-zinc-500'}`}>{earned}</span>
-                                 </div>
-                               ) : (
-                                 <CheckCircle2 className={`w-4 h-4 ${pred?.homeScore !== undefined && pred?.awayScore !== undefined ? 'text-emerald-500 opacity-40' : 'text-white opacity-5'}`} />
-                               )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Standing Table */}
-                  {!isKnockout && (
-                    <div className="w-full lg:w-[320px] bg-white/[0.02] border border-white/5 rounded-2xl p-5 h-fit mt-12 lg:mt-11">
-                       <h4 className="text-[10px] font-black uppercase tracking-[0.4em] text-brand-zinc-400 mb-6 flex items-center gap-3">
-                         <Trophy className="w-3 h-3 text-brand-gold" /> Clasificación
-                       </h4>
-                       <table className="w-full text-[10px]">
-                         <thead>
-                           <tr className="text-brand-zinc-500 uppercase border-b border-white/5">
-                             <th className="pb-3 text-left font-black">Equipo</th>
-                             <th className="pb-3 px-1 text-center font-black">PJ</th>
-                             <th className="pb-3 px-1 text-center font-black">DG</th>
-                             <th className="pb-3 text-right font-black">Pts</th>
-                           </tr>
-                         </thead>
-                         <tbody className="divide-y divide-white/[0.03]">
-                           {groupStandings.map((team, idx) => (
-                             <tr key={team.name} className="group/row hover:bg-white/[0.02] transition-colors">
-                               <td className="py-3 flex items-center gap-2">
-                                 <span className={`w-1.5 h-1.5 rounded-full ${idx < 2 ? 'bg-emerald-500' : 'bg-brand-zinc-700'}`} />
-                                 <div className="w-5 h-3 rounded-[1px] overflow-hidden border border-white/10 shrink-0">
-                                   <img src={getFlagUrl(team.name)} className="w-full h-full object-cover scale-150" alt="" />
-                                 </div>
-                                 <span className="font-black uppercase text-brand-zinc-300 truncate max-w-[100px]">{team.name}</span>
-                               </td>
-                               <td className="py-3 px-1 text-center font-bold text-white/40">{team.mp}</td>
-                               <td className="py-3 px-1 text-center font-bold text-white/40">{(team.gf - team.ga) > 0 ? `+${team.gf - team.ga}` : (team.gf - team.ga)}</td>
-                               <td className="py-3 text-right font-black text-brand-gold text-xs">{team.pts}</td>
-                             </tr>
-                           ))}
-                         </tbody>
-                       </table>
-                       <p className="mt-6 text-[8px] font-bold text-brand-zinc-600 uppercase tracking-widest text-center">
-                         * Clasifican los 2 primeros de cada grupo
-                       </p>
-                    </div>
-                  )}
+              <button
+                key={candidate.name}
+                type="button"
+                disabled={!canEdit || new Date() > new Date(GROUP_DEADLINE_ISO)}
+                onClick={() => {
+                  setScorerName(candidate.name);
+                  setScorerTeamId(team?.id || '');
+                  scheduleAutoSave('scorer', () => saveScorer(candidate.name, team?.id || ''));
+                }}
+                className={`group overflow-hidden rounded-xl border text-left transition-all disabled:opacity-40 ${selected ? 'border-brand-gold bg-brand-gold/10' : 'border-white/10 bg-white/[0.03] hover:border-brand-gold/40'}`}
+              >
+                <div className="aspect-[4/3] bg-black/40">
+                  <img
+                    src={candidate.photoUrl}
+                    alt={candidate.name}
+                    className="h-full w-full object-cover grayscale group-hover:grayscale-0 transition-all"
+                    onError={(event) => { event.currentTarget.style.display = 'none'; }}
+                  />
                 </div>
-              </div>
+                <div className="p-3">
+                  <p className="text-xs font-black uppercase leading-tight">{candidate.name}</p>
+                  <p className="mt-1 text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">{candidate.team} · {candidate.position}</p>
+                </div>
+              </button>
             );
           })}
         </div>
-      </div>
-      
-      {/* Footer Branding */}
-      <div className="pt-20 border-t border-white/5 text-center px-6">
-        <p className="text-[10px] font-black uppercase tracking-[0.6em] text-brand-zinc-700">Panel Oficial de Pronósticos © 2026</p>
-      </div>
+        <p className="mt-3 text-[11px] text-brand-zinc-500">Lista orientativa de candidatos destacados. Puedes escribir cualquier otro jugador si prefieres una apuesta propia.</p>
+      </section>
 
+      <section className="space-y-6">
+        <div className="grid sm:grid-cols-2 gap-3 pb-4 border-b border-white/10">
+          <PhaseButton active={activeFilter === 'groups'} onClick={() => setActiveFilter('groups')} title="Fase 1 - Clasificación" date={formatDateTime(GROUP_DEADLINE_ISO)} />
+          <PhaseButton active={activeFilter === 'knockout'} onClick={() => setActiveFilter('knockout')} title="Fase 2 - Eliminatoria" date={formatDateTime(KNOCKOUT_DEADLINE_ISO)} />
+        </div>
 
-      {/* Scorer Detail Modal */}
-      <AnimatePresence>
-        {selectedScorerInfo && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-md">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="dimension-card-accent w-full max-w-lg p-8 relative"
-            >
-              <button onClick={() => setSelectedScorerInfo(null)} className="absolute top-4 right-4 text-brand-zinc-500 hover:text-white">
-                <AlertCircle className="w-6 h-6 rotate-45" />
-              </button>
+        {activeFilter === 'knockout' && (
+          <FinalistsPanel
+            teams={selectableTeams}
+            pick={finalistPrediction}
+            locked={!canEdit || new Date() > new Date(KNOCKOUT_DEADLINE_ISO)}
+            saving={savingId === 'finalists'}
+            onChange={updateFinalistPick}
+            onSave={() => saveFinalists()}
+          />
+        )}
 
-              <div className="flex flex-col sm:flex-row items-center gap-8">
-                <div className="w-32 h-32 rounded-3xl bg-brand-zinc-900 border border-brand-gold/20 overflow-hidden shrink-0 relative">
-                  <img src={selectedScorerInfo.photoUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedScorerInfo.name)}&background=AE9C50&color=000&bold=true`; }} />
-                  <img src={getFlagUrl(selectedScorerInfo.team)} className="absolute bottom-2 right-2 w-8 h-5 object-cover border border-white/20 rounded shadow-lg" alt="" referrerPolicy="no-referrer" />
-                </div>
-                <div className="text-center sm:text-left space-y-2">
-                  <span className="text-[10px] font-black uppercase tracking-[0.3em] text-brand-gold">{selectedScorerInfo.team}</span>
-                  <h3 className="text-3xl font-black uppercase tracking-tighter italic">{selectedScorerInfo.name}</h3>
-                  <div className="inline-block px-3 py-1 bg-brand-gold/10 border border-brand-gold/20 rounded-full text-[10px] font-bold text-brand-gold uppercase tracking-widest">
-                    {selectedScorerInfo.status}
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-10 grid gap-4">
-                <div className="p-4 bg-white/5 rounded-2xl border border-white/5 flex items-start gap-4">
-                  <Trophy className="w-5 h-5 text-brand-gold mt-1" />
-                  <div>
-                    <p className="text-[10px] font-black uppercase text-brand-zinc-500 tracking-widest mb-1">Historia Goleadora</p>
-                    <p className="text-sm font-bold text-white">{selectedScorerInfo.history}</p>
-                  </div>
-                </div>
-                <div className="p-4 bg-white/5 rounded-2xl border border-white/5 flex items-start gap-4">
-                  <Target className="w-5 h-5 text-brand-accent mt-1" />
-                  <div>
-                    <p className="text-[10px] font-black uppercase text-brand-zinc-500 tracking-widest mb-1">Claves del Torneo</p>
-                    <p className="text-sm font-bold text-white">{selectedScorerInfo.average}</p>
-                  </div>
-                </div>
-              </div>
-
-              <button 
-                onClick={() => { saveScorer(selectedScorerInfo.id); setSelectedScorerInfo(null); }}
-                className="w-full mt-10 py-5 bg-brand-gold text-brand-black text-xs font-black uppercase tracking-[0.3em] rounded-2xl hover:brightness-110 active:scale-95 transition-all shadow-[0_15px_30px_rgba(209,178,0,0.2)]"
-              >
-                Elegir como mi Killer
-              </button>
-            </motion.div>
+        {activeFilter === 'knockout' && (
+          <div className="rounded-2xl border border-brand-gold/20 bg-brand-gold/5 p-5 text-sm text-brand-zinc-300">
+            <span className="font-black uppercase tracking-widest text-brand-gold">Eliminatorias:</span> los dieciseisavos se rellenan con los cruces reales confirmados. Desde octavos hasta la final haces tu previsión manual antes del {formatDateTime(KNOCKOUT_DEADLINE_ISO)}.
           </div>
         )}
-      </AnimatePresence>
+
+        <div className="space-y-16">
+          {Object.entries(matchesByPhase).map(([phase, phaseMatches]) => (
+            <div key={phase} className="space-y-4">
+              <h3 className="text-xl font-black uppercase tracking-[0.2em] italic text-white">{phase}</h3>
+              <div className={phase.startsWith('Grupo ') ? 'grid gap-4 md:grid-cols-[minmax(0,1fr)_320px]' : 'grid gap-2'}>
+                <div className="grid gap-2">
+                {phaseMatches.map((match) => {
+                  const pred = matchPredictions[match.id];
+                  const knockoutPred = knockoutPredictions[match.id];
+                  const isKnockout = isKnockoutFixture(match);
+                  const locked = !canEdit || (isKnockout ? new Date() > new Date(KNOCKOUT_DEADLINE_ISO) : isMatchLocked(match));
+                  const marketClosed = isMatchLocked(match);
+                  const knockoutSaved = knockoutPred?.predicted_home_team_id && knockoutPred?.predicted_away_team_id && knockoutPred.predicted_home_team_id !== knockoutPred.predicted_away_team_id;
+
+                  if (isKnockout) {
+                    return (
+                      <motion.div
+                        key={match.id}
+                        initial={{ opacity: 0, y: 8 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true }}
+                        className={`grid grid-cols-1 lg:grid-cols-[150px_1fr_1.4fr_110px] items-center gap-4 p-4 rounded-xl border transition-all ${locked ? 'bg-white/[0.02] border-white/5' : 'bg-white/5 border-white/10 hover:border-brand-gold/30'}`}
+                      >
+                        <div className="text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">
+                          <Clock className="w-3 h-3 inline mr-1 text-brand-gold" />
+                          {formatDateTime(match.kickoff_at)}
+                          <div className="mt-1 text-brand-zinc-500">
+                            <Tv className="w-3 h-3 inline mr-1 text-brand-gold/70" />
+                            {match.tv_channel_es || 'DAZN / Canal Mediapro'}
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="text-[10px] font-black uppercase tracking-[0.16em] text-brand-gold">
+                            Partido {match.match_number || '-'} • {match.phase}
+                          </div>
+                          <FixtureTeams match={match} />
+                        </div>
+
+                        {(match.round_number || 0) === 4 ? (
+                          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs text-brand-zinc-400">
+                            Cruce real: se completará automáticamente cuando FIFA confirme los equipos.
+                          </div>
+                        ) : (
+                          <KnockoutPickControl
+                            match={match}
+                            teams={selectableTeams}
+                            pick={knockoutPred}
+                            locked={locked}
+                            onChange={updateKnockoutPick}
+                            onSave={saveKnockoutPrediction}
+                          />
+                        )}
+
+                        <div className="flex items-center justify-end gap-2">
+                          {savingId === `ko-${match.id}` ? <Loader2 className="w-4 h-4 animate-spin text-brand-gold" /> : locked ? <Lock className="w-4 h-4 text-brand-zinc-500" /> : <CheckCircle2 className={`w-4 h-4 ${knockoutSaved ? 'text-emerald-400' : 'text-white/10'}`} />}
+                        </div>
+                      </motion.div>
+                    );
+                  }
+
+                  return (
+                    <motion.div
+                      key={match.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      viewport={{ once: true }}
+                      className={`grid grid-cols-1 md:grid-cols-[150px_1fr_112px_1fr_110px] items-center gap-3 p-4 rounded-xl border transition-all ${locked ? 'bg-white/[0.02] border-white/5' : 'bg-white/5 border-white/10 hover:border-brand-gold/30'}`}
+                    >
+                      <div className="text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">
+                        <Clock className="w-3 h-3 inline mr-1 text-brand-gold" />
+                        {formatDateTime(match.kickoff_at)}
+                        <div className="mt-1 text-brand-zinc-500">
+                          <Tv className="w-3 h-3 inline mr-1 text-brand-gold/70" />
+                          {match.tv_channel_es || 'DAZN / Canal Mediapro'}
+                        </div>
+                      </div>
+                      <TeamSide name={match.home_team_name} code={match.home_team_code} align="right" />
+                      <div className="flex items-center justify-center gap-1.5">
+                        <input
+                          type="number"
+                          min="0"
+                          value={pred?.home_score ?? ''}
+                          onChange={(event) => handleScoreChange(match, 'home', event.target.value)}
+                          onBlur={() => saveMatchPrediction(match)}
+                          disabled={locked}
+                          className="w-10 h-10 bg-black/40 border border-brand-gold/30 rounded-lg text-center text-sm font-black focus:border-brand-gold outline-none disabled:opacity-40"
+                        />
+                        <span className="text-brand-gold/40 font-black text-xs">-</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={pred?.away_score ?? ''}
+                          onChange={(event) => handleScoreChange(match, 'away', event.target.value)}
+                          onBlur={() => saveMatchPrediction(match)}
+                          disabled={locked}
+                          className="w-10 h-10 bg-black/40 border border-brand-gold/30 rounded-lg text-center text-sm font-black focus:border-brand-gold outline-none disabled:opacity-40"
+                        />
+                      </div>
+                      <TeamSide name={match.away_team_name} code={match.away_team_code} align="left" />
+                      <div className="flex items-center justify-end gap-2">
+                        {savingId === match.id ? <Loader2 className="w-4 h-4 animate-spin text-brand-gold" /> : marketClosed || !canEdit ? <Lock className="w-4 h-4 text-brand-zinc-500" /> : <CheckCircle2 className={`w-4 h-4 ${pred?.home_score !== undefined && pred?.away_score !== undefined ? 'text-emerald-400' : 'text-white/10'}`} />}
+                      </div>
+                    </motion.div>
+                  );
+                })}
+                </div>
+                {phase.startsWith('Grupo ') && (
+                  <div className="hidden md:block">
+                    <GroupStandingCard group={phase.replace('Grupo ', '')} rows={predictedStandings[phase.replace('Grupo ', '')] || []} />
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="space-y-5 md:hidden">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <h2 className="text-lg font-black uppercase tracking-tighter italic flex items-center gap-3"><Trophy className="w-5 h-5 text-brand-gold" /> Clasificación prevista automática</h2>
+          <span className="text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">Cierra {formatDateTime(GROUP_DEADLINE_ISO)}</span>
+        </div>
+        <p className="text-sm text-brand-zinc-400">Se calcula automáticamente con tus marcadores. Puesto exacto: {POINTS.groupExactPosition} pts. Clasificado acertado sin puesto exacto: {POINTS.groupQualified} pts.</p>
+        <div className="grid gap-4">
+          {groups.map((group) => <GroupStandingCard key={group} group={group} rows={predictedStandings[group] || []} />)}
+        </div>
+      </section>
+
+      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-xs text-brand-zinc-400">
+        La fase de grupos cierra el {formatDateTime(GROUP_DEADLINE_ISO)}. La fase eliminatoria cierra el {formatDateTime(KNOCKOUT_DEADLINE_ISO)}.
+      </div>
     </div>
   );
 }
 
+function ViewerNotice({ icon: Icon, title, text, action, onClick }: { icon: typeof Eye; title: string; text: string; action: string; onClick?: () => void }) {
+  return (
+    <div className="dimension-card-accent p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+      <div className="flex gap-4">
+        <div className="w-11 h-11 rounded-xl bg-brand-gold/10 border border-brand-gold/20 flex items-center justify-center shrink-0">
+          <Icon className="w-5 h-5 text-brand-gold" />
+        </div>
+        <div>
+          <h2 className="text-sm font-black uppercase tracking-widest">{title}</h2>
+          <p className="text-sm text-brand-zinc-400 mt-1">{text}</p>
+        </div>
+      </div>
+      {onClick && <button onClick={onClick} className="dimension-button-primary px-6 whitespace-nowrap">{action}</button>}
+    </div>
+  );
+}
+
+function SaveStatusPill({ status }: { status: SaveStatus }) {
+  if (status === 'idle') return null;
+  const label = status === 'saving' ? 'Guardando...' : status === 'saved' ? 'Guardado' : 'Error al guardar';
+  return (
+    <div className={`flex items-center gap-2 rounded-full border px-3 py-2 text-[9px] font-black uppercase tracking-widest ${status === 'error' ? 'border-red-400/30 bg-red-500/10 text-red-200' : 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'}`}>
+      {status === 'saving' ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+      {label}
+    </div>
+  );
+}
+
+function PhaseButton({ active, onClick, title, date }: { active: boolean; onClick: () => void; title: string; date: string }) {
+  return (
+    <button onClick={onClick} className={`rounded-xl border p-4 text-left transition-all ${active ? 'border-brand-gold bg-brand-gold/10 shadow-lg shadow-brand-gold/10' : 'border-white/10 bg-white/[0.03] hover:border-white/20'}`}>
+      <span className={`block text-sm font-black uppercase tracking-widest ${active ? 'text-brand-gold' : 'text-white'}`}>{title}</span>
+      <span className="mt-1 block text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">Cierre: {date}</span>
+    </button>
+  );
+}
+
+function FinalistsPanel({
+  teams,
+  pick,
+  locked,
+  saving,
+  onChange,
+  onSave,
+}: {
+  teams: Team[];
+  pick: Partial<FinalistPrediction> | null;
+  locked: boolean;
+  saving: boolean;
+  onChange: (slot: FinalistSlot, teamId: string) => void;
+  onSave: () => void;
+}) {
+  const slots: { slot: FinalistSlot; label: string; value?: string | null }[] = [
+    { slot: 'champion', label: 'Campeón', value: pick?.champion_team_id },
+    { slot: 'runner_up', label: 'Segundo', value: pick?.runner_up_team_id },
+    { slot: 'third', label: 'Tercero', value: pick?.third_team_id },
+    { slot: 'fourth', label: 'Cuarto', value: pick?.fourth_team_id },
+  ];
+  const selectedIds = slots.map((item) => item.value).filter(Boolean);
+  const complete = selectedIds.length === 4 && new Set(selectedIds).size === 4;
+
+  return (
+    <div className="dimension-card-accent p-6 space-y-5">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-black uppercase tracking-tighter italic flex items-center gap-3">
+            <Medal className="w-5 h-5 text-brand-gold" /> Finalistas
+          </h2>
+          <p className="mt-1 text-sm text-brand-zinc-400">
+            Elige tus cuatro selecciones finales. Puesto exacto: {POINTS.finalistExactPosition} pts. Acertar finalista sin puesto exacto: {POINTS.finalistQualified} pts.
+          </p>
+        </div>
+        <button onClick={onSave} disabled={locked || !complete} className="dimension-button-primary px-5 flex items-center justify-center gap-2 disabled:opacity-40">
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Guardar
+        </button>
+      </div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {slots.map((item) => (
+          <TeamSelect
+            key={item.slot}
+            label={item.label}
+            value={item.value || ''}
+            teams={teams}
+            locked={locked}
+            onChange={(teamId) => onChange(item.slot, teamId)}
+          />
+        ))}
+      </div>
+      {!complete && !locked && (
+        <p className="text-[11px] font-bold text-amber-200">Completa cuatro selecciones diferentes para dejar esta parte cerrada.</p>
+      )}
+    </div>
+  );
+}
+
+function TeamSide({ name, code, align }: { name: string; code: string | null; align: 'left' | 'right' }) {
+  return (
+    <div className={`flex items-center gap-3 ${align === 'right' ? 'md:justify-end' : 'md:justify-start'}`}>
+      {align === 'left' && <Flag code={code} name={name} />}
+      <span className={`text-xs font-black uppercase tracking-tight leading-tight ${align === 'right' ? 'md:text-right' : ''}`}>{displayTeam(name, code)}</span>
+      {align === 'right' && <Flag code={code} name={name} />}
+    </div>
+  );
+}
+
+function FixtureTeams({ match }: { match: Match }) {
+  return (
+    <div className="grid sm:grid-cols-[1fr_auto_1fr] items-center gap-2">
+      <TeamSide name={match.home_team_name} code={match.home_team_code} align="right" />
+      <span className="text-brand-gold/40 font-black text-[10px] text-center">VS</span>
+      <TeamSide name={match.away_team_name} code={match.away_team_code} align="left" />
+    </div>
+  );
+}
+
+function KnockoutPickControl({
+  match,
+  teams,
+  pick,
+  locked,
+  onChange,
+  onSave,
+}: {
+  match: Match;
+  teams: Team[];
+  pick?: Partial<KnockoutPrediction>;
+  locked: boolean;
+  onChange: (matchId: string, side: 'home' | 'away', teamId: string) => void;
+  onSave: (match: Match) => void;
+}) {
+  const valid = pick?.predicted_home_team_id && pick?.predicted_away_team_id && pick.predicted_home_team_id !== pick.predicted_away_team_id;
+
+  return (
+    <div className="grid sm:grid-cols-[1fr_auto_1fr_auto] items-center gap-2">
+      <TeamSelect
+        label="Equipo 1"
+        value={pick?.predicted_home_team_id || ''}
+        teams={teams}
+        locked={locked}
+        onChange={(teamId) => onChange(match.id, 'home', teamId)}
+      />
+      <span className="hidden sm:block text-brand-gold/40 font-black text-[10px]">VS</span>
+      <TeamSelect
+        label="Equipo 2"
+        value={pick?.predicted_away_team_id || ''}
+        teams={teams}
+        locked={locked}
+        onChange={(teamId) => onChange(match.id, 'away', teamId)}
+      />
+      <button
+        onClick={() => onSave(match)}
+        disabled={locked || !valid}
+        className="rounded-lg bg-brand-gold text-black h-10 px-4 text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
+      >
+        Guardar
+      </button>
+    </div>
+  );
+}
+
+function TeamSelect({ label, value, teams, locked, onChange }: { label: string; value: string; teams: Team[]; locked: boolean; onChange: (teamId: string) => void }) {
+  return (
+    <label className="space-y-1">
+      <span className="text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={locked || teams.length === 0}
+        className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs font-bold outline-none focus:border-brand-gold disabled:opacity-40"
+      >
+        <option value="">{teams.length ? 'Selecciona equipo' : 'Sin equipos'}</option>
+        {teams.map((team) => <option key={team.id} value={team.id}>{displayTeam(team.name, team.code)}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function Flag({ code, name }: { code: string | null; name: string }) {
+  return (
+    <div className="w-8 h-5 rounded-[2px] overflow-hidden border border-white/10 shrink-0">
+      <img src={getFlagUrl(name, code)} className="w-full h-full object-cover scale-125" alt="" />
+    </div>
+  );
+}
+
+function GroupStandingCard({ group, rows }: { group: string; rows: PredictedStandingRow[] }) {
+  return (
+    <div className="dimension-card p-5 border-white/10">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-black uppercase tracking-widest">Grupo {group}</h3>
+        <span className="text-[9px] font-black uppercase tracking-widest text-brand-gold">Auto</span>
+      </div>
+      <div className="space-y-2">
+        {rows.length === 0 ? (
+          <p className="text-xs text-brand-zinc-500">Introduce marcadores para ver la tabla prevista.</p>
+        ) : rows.map((row) => (
+          <div key={row.teamId} className={`grid grid-cols-[28px_1fr_auto] items-center gap-3 rounded-lg border px-3 py-2 ${row.position <= 2 ? 'border-brand-gold/20 bg-brand-gold/5' : 'border-white/5 bg-white/[0.02]'}`}>
+            <span className="text-xs font-black text-brand-gold">{row.position}</span>
+            <div className="min-w-0">
+              <p className="truncate text-xs font-black uppercase text-white">{displayTeam(row.teamName, row.teamCode)}</p>
+              <p className="text-[9px] text-brand-zinc-500">{row.gf}-{row.ga} · DG {row.gd}</p>
+            </div>
+            <span className="font-mono text-xs font-black text-brand-zinc-300">{row.pts}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function calculatePredictedStandings(group: string, teams: Team[], matches: Match[], predictions: MatchPredictionMap) {
+  const rows = new Map<string, Omit<PredictedStandingRow, 'position'>>();
+
+  teams.filter((team) => team.group_code === group).forEach((team) => {
+    rows.set(team.id, {
+      teamId: team.id,
+      teamName: team.name,
+      teamCode: team.code,
+      pts: 0,
+      gf: 0,
+      ga: 0,
+      gd: 0,
+    });
+  });
+
+  matches.filter((match) => match.group_code === group).forEach((match) => {
+    const pred = predictions[match.id];
+    if (pred?.home_score === undefined || pred?.away_score === undefined) return;
+    if (!match.home_team_id || !match.away_team_id) return;
+
+    const home = rows.get(match.home_team_id);
+    const away = rows.get(match.away_team_id);
+    if (!home || !away) return;
+
+    home.gf += pred.home_score;
+    home.ga += pred.away_score;
+    away.gf += pred.away_score;
+    away.ga += pred.home_score;
+    home.gd = home.gf - home.ga;
+    away.gd = away.gf - away.ga;
+
+    if (pred.home_score > pred.away_score) home.pts += 3;
+    else if (pred.home_score < pred.away_score) away.pts += 3;
+    else {
+      home.pts += 1;
+      away.pts += 1;
+    }
+  });
+
+  return Array.from(rows.values())
+    .sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || displayTeam(a.teamName, a.teamCode).localeCompare(displayTeam(b.teamName, b.teamCode), 'es'))
+    .map((row, index) => ({ ...row, position: index + 1 }));
+}

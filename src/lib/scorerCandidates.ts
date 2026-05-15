@@ -1,0 +1,17 @@
+export const SCORER_CANDIDATES = [
+  { name: 'Kylian Mbappe', team: 'Francia', code: 'FRA', position: 'Delantero', photoUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Kylian%20Mbapp%C3%A9%202019.jpg' },
+  { name: 'Erling Haaland', team: 'Noruega', code: 'NOR', position: 'Delantero', photoUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Erling%20Haaland%202023.jpg' },
+  { name: 'Lionel Messi', team: 'Argentina', code: 'ARG', position: 'Delantero', photoUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Lionel%20Messi%20WC2022.jpg' },
+  { name: 'Harry Kane', team: 'Inglaterra', code: 'ENG', position: 'Delantero', photoUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Harry%20Kane%202018.jpg' },
+  { name: 'Vinicius Junior', team: 'Brasil', code: 'BRA', position: 'Delantero', photoUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Vinicius%20Junior%202018.jpg' },
+  { name: 'Jude Bellingham', team: 'Inglaterra', code: 'ENG', position: 'Centrocampista', photoUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Jude%20Bellingham%202022.jpg' },
+  { name: 'Lamine Yamal', team: 'España', code: 'ESP', position: 'Delantero', photoUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Lamine%20Yamal%202023.jpg' },
+  { name: 'Florian Wirtz', team: 'Alemania', code: 'GER', position: 'Centrocampista', photoUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Florian%20Wirtz%202022.jpg' },
+  { name: 'Jamal Musiala', team: 'Alemania', code: 'GER', position: 'Centrocampista', photoUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Jamal%20Musiala%202022.jpg' },
+  { name: 'Bukayo Saka', team: 'Inglaterra', code: 'ENG', position: 'Delantero', photoUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Bukayo%20Saka%202018.jpg' },
+  { name: 'Raphinha', team: 'Brasil', code: 'BRA', position: 'Delantero', photoUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Raphinha%202022.jpg' },
+  { name: 'Cristiano Ronaldo', team: 'Portugal', code: 'POR', position: 'Delantero', photoUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Cristiano%20Ronaldo%202018.jpg' },
+  { name: 'Bruno Fernandes', team: 'Portugal', code: 'POR', position: 'Centrocampista', photoUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Bruno%20Fernandes%202018.jpg' },
+  { name: 'Julian Alvarez', team: 'Argentina', code: 'ARG', position: 'Delantero', photoUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Julian%20Alvarez%202022.jpg' },
+  { name: 'Christian Pulisic', team: 'Estados Unidos', code: 'USA', position: 'Delantero', photoUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Christian%20Pulisic%202019.jpg' },
+];

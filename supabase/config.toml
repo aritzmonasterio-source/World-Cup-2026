@@ -1,0 +1,4 @@
+project_id = "world-cup-2026-predictor"
+
+[functions.sync-fifa-matches]
+verify_jwt = true

@@ -1,4 +1,5 @@
 node_modules/
+bin/
 build/
 dist/
 coverage/
@@ -6,3 +7,9 @@ coverage/
 *.log
 .env*
 !.env.example
+
+supabase/.temp/
+artifacts/
+
+supabase/.temp/
+artifacts/
