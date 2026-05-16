@@ -37,6 +37,9 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
+    const startupTimer = window.setTimeout(() => {
+      if (mounted) setLoading(false);
+    }, 4500);
 
     async function loadProfile(currentUser: SupabaseUser | null) {
       if (!currentUser || !isSupabaseConfigured) {
@@ -44,6 +47,7 @@ export default function App() {
           setUser(currentUser);
           setProfile(null);
           setLoading(false);
+          window.clearTimeout(startupTimer);
         }
         return;
       }
@@ -101,10 +105,11 @@ export default function App() {
         setUser(currentUser);
         setProfile(effectiveProfile);
         setLoading(false);
+        window.clearTimeout(startupTimer);
       }
     }
 
-    supabase.auth.getUser().then(({ data }) => loadProfile(data.user));
+    supabase.auth.getUser().then(({ data }) => loadProfile(data.user)).catch(() => loadProfile(null));
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
         setAuthRecoveryMode(true);
@@ -115,6 +120,7 @@ export default function App() {
 
     return () => {
       mounted = false;
+      window.clearTimeout(startupTimer);
       listener.subscription.unsubscribe();
     };
   }, [selectedCommunityId]);

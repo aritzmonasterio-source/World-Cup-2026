@@ -112,8 +112,8 @@ export default function Dashboard({
               </button>
             </div>
             <div className="grid sm:grid-cols-2 gap-3 sm:gap-4 mb-6 sm:mb-8">
-              <TutorialStep n="1" title="Crea cuenta" text="Regístrate con email y contraseña. Recibirás confirmación por email." />
-              <TutorialStep n="2" title="Explora el calendario" text="Sin registrarte puedes consultar partidos, horarios y banderas." />
+              <TutorialStep n="1" title="Elige comunidad" text="Selecciona la comunidad en la que quieres jugar o a la que perteneces." />
+              <TutorialStep n="2" title="Crea cuenta" text="Regístrate con email y contraseña. Recibirás confirmación por email." />
               <TutorialStep n="3" title="Completa tus fases" text="Primero grupos y goleador. Después finalistas y cuadro eliminatorio." />
               <TutorialStep n="4" title="Sigue el ranking" text="Los puntos se actualizan con resultados, goles y clasificaciones." />
             </div>
@@ -155,7 +155,7 @@ export default function Dashboard({
             </button>
             {!user && (
               <button onClick={() => setShowAuth(true)} className="px-8 py-4 rounded-lg bg-white/5 border border-white/10 text-xs font-black uppercase tracking-widest hover:border-brand-gold/30 transition-all">
-                Crear cuenta
+                Entrar / registrarme
               </button>
             )}
             <button onClick={() => setShowTutorial(true)} className="px-8 py-4 rounded-lg bg-white/5 border border-white/10 text-xs font-black uppercase tracking-widest hover:border-brand-gold/30 transition-all">

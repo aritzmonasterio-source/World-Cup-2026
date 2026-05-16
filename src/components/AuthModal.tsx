@@ -151,16 +151,35 @@ export default function AuthModal({
             <img src={NEUTRAL_THEME.logoUrl} alt="Mundial 2026" className="h-16 w-auto object-contain" />
           </div>
           <h2 className="text-3xl font-black uppercase tracking-tighter leading-none">
-            {forcePasswordRecovery ? 'Nueva clave' : isLogin ? 'Acceso' : 'Registro'} <span className="text-brand-gold">Juego</span>
+            {forcePasswordRecovery ? 'Nueva clave' : isLogin ? 'Acceso' : 'Nuevo registro'} <span className="text-brand-gold">Juego</span>
           </h2>
           <p className="text-[10px] text-brand-gold mt-3 uppercase font-black tracking-[0.4em] opacity-70">{selectedCommunity.name}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {!forcePasswordRecovery && (
+            <div className="grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-black/20 p-1">
+              <button
+                type="button"
+                onClick={() => setIsLogin(true)}
+                className={`rounded-xl px-4 py-3 text-[10px] font-black uppercase tracking-widest transition-all ${isLogin ? 'bg-brand-gold text-black' : 'text-brand-zinc-400 hover:text-white'}`}
+              >
+                Entrar
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsLogin(false)}
+                className={`rounded-xl px-4 py-3 text-[10px] font-black uppercase tracking-widest transition-all ${!isLogin ? 'bg-brand-gold text-black' : 'text-brand-zinc-400 hover:text-white'}`}
+              >
+                Registrarme
+              </button>
+            </div>
+          )}
+
           {!forcePasswordRecovery && <div className="space-y-3">
             <div className="flex items-center gap-2 text-brand-gold">
               <Users className="w-4 h-4" />
-              <p className="text-[10px] font-black uppercase tracking-[0.28em]">Elige comunidad</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.22em]">Elige la comunidad en la que quieres jugar</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {COMMUNITIES.map((community) => (
@@ -237,29 +256,6 @@ export default function AuthModal({
             </button>
           )}
 
-          {!forcePasswordRecovery && <div className="relative group">
-            <Users className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-gold/40 group-focus-within:text-brand-gold transition-colors" />
-            <select
-              value={communityId}
-              onChange={(event) => setCommunityId(event.target.value as CommunityId)}
-              className="w-full bg-black/40 border border-brand-gold/10 rounded-lg py-4 pl-12 pr-4 text-[10px] font-black uppercase tracking-[0.2em] focus:border-brand-gold outline-none transition-all"
-            >
-              {COMMUNITIES.map((community) => (
-                <option key={community.id} value={community.id}>{community.name}</option>
-              ))}
-            </select>
-          </div>}
-
-          {!forcePasswordRecovery && <div className="rounded-xl border border-brand-gold/20 bg-brand-gold/5 p-4 flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-black/30 border border-brand-gold/20 flex items-center justify-center overflow-hidden shrink-0">
-              {selectedCommunity.logoUrl ? <img src={selectedCommunity.logoUrl} alt="" className="h-10 w-auto object-contain" /> : <span className="font-black text-brand-gold">{selectedCommunity.logoText}</span>}
-            </div>
-            <div>
-              <p className="text-xs font-black uppercase tracking-widest text-white">{selectedCommunity.name}</p>
-              <p className="text-xs text-brand-zinc-400 mt-1 leading-relaxed">{selectedCommunity.description}</p>
-            </div>
-          </div>}
-
           {error && <p className="rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-3 text-xs text-red-200">{error}</p>}
           {message && <p className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 text-xs text-emerald-200">{message}</p>}
         </form>
@@ -282,7 +278,7 @@ export default function AuthModal({
         </div>}
 
         {!forcePasswordRecovery && <button onClick={() => setIsLogin(!isLogin)} className="w-full text-center mt-8 text-[10px] text-white font-black uppercase tracking-[0.2em] hover:text-brand-gold transition-all">
-          {isLogin ? 'Crear una cuenta nueva' : 'Ya tengo cuenta'}
+          {isLogin ? 'No tengo cuenta: registrarme' : 'Ya tengo cuenta: entrar'}
         </button>}
       </motion.div>
     </div>
