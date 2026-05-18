@@ -285,7 +285,7 @@ function InstallAppCard({
     <section className="dimension-card-accent p-5 sm:hidden">
       <div className="flex items-start gap-4">
         <div className="h-12 w-12 shrink-0 rounded-xl border border-brand-gold/20 bg-white p-1.5 shadow-lg">
-          <img src="/icons/world-cup-2026-icon.png" alt="Mundial 2026" className="h-full w-full object-contain" />
+          <img src="/icons/world-cup-2026-icon-white.png" alt="Mundial 2026" className="h-full w-full object-contain" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-brand-gold">

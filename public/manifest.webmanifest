@@ -10,13 +10,13 @@
   "theme_color": "#07131a",
   "icons": [
     {
-      "src": "/icons/world-cup-2026-icon.png",
+      "src": "/icons/world-cup-2026-icon-white.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/icons/world-cup-2026-icon.png",
+      "src": "/icons/world-cup-2026-icon-white.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

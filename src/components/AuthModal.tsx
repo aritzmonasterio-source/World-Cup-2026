@@ -3,6 +3,7 @@ import { Info, Lock, Mail, User, Users, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { COMMUNITIES, NEUTRAL_THEME, getCommunity, getCommunityThemeStyle, type CommunityId } from '../lib/communities';
+import { ADMIN_EMAIL } from '../lib/constants';
 
 export default function AuthModal({
   isOpen,
@@ -50,10 +51,25 @@ export default function AuthModal({
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    setLoading(true);
     setError('');
     setMessage('');
     onCommunityChange(communityId);
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const validationError = validateForm({
+      forcePasswordRecovery,
+      isLogin,
+      email: normalizedEmail,
+      password,
+      newPassword,
+      username,
+    });
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    setLoading(true);
 
     if (!isSupabaseConfigured) {
       setLoading(false);
@@ -63,7 +79,6 @@ export default function AuthModal({
 
     try {
       if (forcePasswordRecovery) {
-        if (newPassword.length < 6) throw new Error('La nueva contraseña debe tener al menos 6 caracteres.');
         const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
         if (updateError) throw updateError;
         setMessage('Contraseña actualizada. Ya puedes entrar con la nueva clave.');
@@ -72,14 +87,12 @@ export default function AuthModal({
         onRecoveryComplete?.();
         setTimeout(onClose, 900);
       } else if (isLogin) {
-        const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        const { error: signInError } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
         if (signInError) throw signInError;
         onClose();
       } else {
-        if (username.trim().length < 2) throw new Error('Escribe un nombre de usuario.');
-        if (password.length < 6) throw new Error('La contraseña debe tener al menos 6 caracteres.');
-        const { error: signUpError } = await supabase.auth.signUp({
-          email: email.trim(),
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: normalizedEmail,
           password,
           options: {
             data: { username: username.trim(), community_id: communityId },
@@ -87,6 +100,9 @@ export default function AuthModal({
           },
         });
         if (signUpError) throw signUpError;
+        if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+          throw new Error('Este email ya está registrado. Prueba a entrar o recupera la contraseña.');
+        }
         setIsLogin(true);
         setMessage('Cuenta creada. Revisa tu email para confirmar la cuenta. Después el admin aprobará tu acceso.');
       }
@@ -162,7 +178,7 @@ export default function AuthModal({
           <p className="text-[10px] text-brand-gold mt-3 uppercase font-black tracking-[0.25em] sm:tracking-[0.4em] opacity-70">{selectedCommunity.name}</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} noValidate className="space-y-4">
           {!forcePasswordRecovery && (
             <div className="grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-black/20 p-1">
               <button
@@ -255,6 +271,15 @@ export default function AuthModal({
             {loading ? 'Procesando...' : forcePasswordRecovery ? 'Guardar nueva contraseña' : isLogin ? 'Entrar' : 'Crear cuenta'}
           </button>
 
+          {(error || message) && (
+            <div className={`rounded-lg px-4 py-3 text-xs leading-relaxed ${error ? 'bg-red-500/10 border border-red-500/20 text-red-100' : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-100'}`}>
+              {error || message}
+              {error && isLogin && email.trim().toLowerCase() === ADMIN_EMAIL.toLowerCase() && (
+                <span className="mt-2 block text-red-100/80">Si es tu primer acceso como admin, crea la cuenta con este email o usa “Olvidé mi contraseña”.</span>
+              )}
+            </div>
+          )}
+
           {!forcePasswordRecovery && isLogin && (
             <button
               type="button"
@@ -266,8 +291,6 @@ export default function AuthModal({
             </button>
           )}
 
-          {error && <p className="rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-3 text-xs text-red-200">{error}</p>}
-          {message && <p className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 text-xs text-emerald-200">{message}</p>}
         </form>
 
         {!forcePasswordRecovery && <div className="mt-10 pt-8 border-t border-white/5 text-center">
@@ -302,5 +325,34 @@ function translateAuthError(message: string) {
   if (lower.includes('already registered') || lower.includes('already been registered')) return 'Este email ya está registrado. Prueba a entrar o recupera la contraseña.';
   if (lower.includes('password should be') || lower.includes('at least 6')) return 'La contraseña debe tener al menos 6 caracteres.';
   if (lower.includes('unable to validate email')) return 'El email no parece válido.';
+  if (lower.includes('email rate limit exceeded')) return 'Se han pedido demasiados emails. Espera unos minutos y vuelve a intentarlo.';
+  if (lower.includes('not a valid url') || lower.includes('redirect')) return 'La URL de confirmación no está autorizada en Supabase. Hay que añadir la URL de Vercel en Authentication > URL Configuration.';
   return message;
+}
+
+function validateForm({
+  forcePasswordRecovery,
+  isLogin,
+  email,
+  password,
+  newPassword,
+  username,
+}: {
+  forcePasswordRecovery: boolean;
+  isLogin: boolean;
+  email: string;
+  password: string;
+  newPassword: string;
+  username: string;
+}) {
+  if (forcePasswordRecovery) {
+    if (newPassword.length < 6) return 'La nueva contraseña debe tener al menos 6 caracteres.';
+    return '';
+  }
+  if (!email) return 'Escribe tu email.';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Escribe un email válido.';
+  if (!password) return 'Escribe tu contraseña.';
+  if (password.length < 6) return 'La contraseña debe tener al menos 6 caracteres.';
+  if (!isLogin && username.trim().length < 2) return 'Escribe un nombre de usuario.';
+  return '';
 }
