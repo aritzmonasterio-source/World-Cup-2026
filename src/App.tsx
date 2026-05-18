@@ -155,11 +155,11 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden pb-[5.75rem] sm:pb-24 bg-brand-gray" style={getCommunityThemeStyle(activeTheme)}>
+    <div className="min-h-screen overflow-x-hidden pb-28 sm:pb-24 bg-brand-gray" style={getCommunityThemeStyle(activeTheme)}>
       <header className="fixed top-0 w-full bg-brand-gray/95 backdrop-blur-xl border-b border-brand-gold/10 z-40">
-        <div className="max-w-6xl mx-auto px-3 sm:px-6 h-18 sm:h-20 flex items-center justify-between gap-2">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
           <button onClick={() => setActiveTab('dashboard')} className="flex items-center gap-4 text-left">
-            <div className={`h-11 w-11 sm:h-14 sm:w-14 rounded-xl border border-brand-gold/20 flex items-center justify-center overflow-hidden shadow-[0_0_30px_rgba(174,156,80,0.2)] ${showingNeutralWorldLogo ? 'bg-white/90 p-1.5' : 'bg-black/20'}`}>
+            <div className={`h-10 w-10 sm:h-14 sm:w-14 rounded-xl border border-brand-gold/20 flex items-center justify-center overflow-hidden shadow-[0_0_30px_rgba(174,156,80,0.2)] ${showingNeutralWorldLogo ? 'bg-white/90 p-1.5' : 'bg-black/20'}`}>
               {activeTheme.logoUrl ? (
                 <img src={activeTheme.logoUrl} alt={activeTheme.name} className="h-full w-auto object-contain" />
               ) : (
@@ -176,10 +176,11 @@ export default function App() {
             <select
               value={selectedCommunityId}
               onChange={(event) => changeCommunity(event.target.value as CommunityId)}
-              className="max-w-[124px] sm:max-w-none bg-black/30 border border-brand-gold/20 rounded-lg px-2 sm:px-3 py-2 text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-white outline-none focus:border-brand-gold"
+              aria-label="Comunidad"
+              className="max-w-[112px] sm:max-w-none bg-black/30 border border-brand-gold/20 rounded-lg px-2 sm:px-3 py-2 text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-white outline-none focus:border-brand-gold"
             >
               {COMMUNITIES.map((community) => (
-                <option key={community.id} value={community.id}>{community.name}</option>
+                <option key={community.id} value={community.id}>{community.shortName}</option>
               ))}
             </select>
 
@@ -225,7 +226,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-3 sm:px-6 pt-24 sm:pt-28 pb-10 sm:pb-12">
+      <main className="max-w-6xl mx-auto px-3 sm:px-6 pt-20 sm:pt-28 pb-14 sm:pb-12">
         {!isSupabaseConfigured && (
           <div className="mb-8 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-5 text-sm text-amber-100">
             Falta configurar Supabase. Crea `.env.local` con `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` para activar login, datos y ranking.
@@ -252,24 +253,24 @@ export default function App() {
         </AnimatePresence>
       </main>
 
-      <div className="fixed bottom-14 sm:bottom-20 left-0 right-0 z-30 pointer-events-none">
+      <div className="hidden sm:block fixed bottom-20 left-0 right-0 z-30 pointer-events-none">
         <p className="text-center text-[9px] font-black uppercase tracking-[0.28em] text-brand-zinc-500/80 py-2">
           Created By Aritz MR ®
         </p>
       </div>
 
-      <nav className="fixed bottom-0 w-full bg-brand-gray/95 border-t border-brand-gold/10 z-40 backdrop-blur-lg">
-        <div className="max-w-5xl mx-auto grid grid-flow-col auto-cols-fr items-center h-14 sm:h-20 overflow-hidden px-1 sm:px-0">
+      <nav className="fixed bottom-0 w-full bg-brand-gray/95 border-t border-brand-gold/10 z-40 backdrop-blur-lg pb-[env(safe-area-inset-bottom)]">
+        <div className="mobile-tabbar max-w-5xl mx-auto flex sm:grid sm:grid-flow-col sm:auto-cols-fr items-stretch h-16 sm:h-20 overflow-x-auto overflow-y-hidden px-1 sm:px-0 [scrollbar-width:none]">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex min-w-0 flex-col items-center gap-1 sm:gap-1.5 transition-all h-full justify-center relative ${
+              className={`flex min-w-[66px] sm:min-w-0 flex-col items-center gap-1 sm:gap-1.5 transition-all h-full justify-center relative px-1 ${
                 activeTab === tab.id ? 'text-brand-gold' : 'text-brand-zinc-500 hover:text-white'
               }`}
             >
-              <tab.icon className={`w-4 h-4 sm:w-6 sm:h-6 ${activeTab === tab.id ? 'scale-110 drop-shadow-[0_0_8px_rgba(209,178,0,0.4)]' : ''}`} />
-              <span className={`max-w-full truncate text-[6.5px] sm:text-[9px] font-bold uppercase tracking-[0.04em] sm:tracking-[0.15em] ${activeTab === tab.id ? 'opacity-100' : 'opacity-60'}`}>
+              <tab.icon className={`w-[18px] h-[18px] sm:w-6 sm:h-6 ${activeTab === tab.id ? 'scale-110 drop-shadow-[0_0_8px_rgba(209,178,0,0.4)]' : ''}`} />
+              <span className={`max-w-full truncate text-[8px] sm:text-[9px] font-bold uppercase tracking-[0.03em] sm:tracking-[0.15em] ${activeTab === tab.id ? 'opacity-100' : 'opacity-60'}`}>
                 {tab.label}
               </span>
               {activeTab === tab.id && <motion.div layoutId="activeTab" className="absolute bottom-0 w-8 h-0.5 bg-brand-gold rounded-full" />}

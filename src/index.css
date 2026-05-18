@@ -23,10 +23,12 @@
     width: 100%;
     min-height: 100%;
     overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
   }
 
   body {
     @apply bg-brand-gray text-white font-sans antialiased;
+    min-width: 320px;
   }
 
   input,
@@ -34,6 +36,10 @@
   textarea,
   button {
     font: inherit;
+  }
+
+  * {
+    min-width: 0;
   }
 }
 
@@ -59,4 +65,8 @@
 
 .bg-gold {
   @apply bg-brand-gold;
+}
+
+.mobile-tabbar::-webkit-scrollbar {
+  display: none;
 }

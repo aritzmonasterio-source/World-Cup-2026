@@ -356,25 +356,25 @@ export default function Predictions({
   if (loading) return <div className="flex justify-center p-20"><Loader2 className="w-8 h-8 animate-spin text-brand-gold" /></div>;
 
   return (
-    <div className="space-y-12 pb-20">
+    <div className="space-y-8 sm:space-y-12 pb-24">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
         <div>
-          <h1 className="text-3xl font-black uppercase tracking-tighter italic">Mis <span className="text-brand-gold">Pronósticos</span></h1>
-          <p className="text-brand-zinc-500 text-xs font-bold uppercase tracking-widest mt-2">Calendario FIFA real • visible para todos</p>
+          <h1 className="text-2xl sm:text-3xl font-black uppercase tracking-tighter italic">Mis <span className="text-brand-gold">Pronósticos</span></h1>
+          <p className="text-brand-zinc-500 text-[10px] sm:text-xs font-bold uppercase tracking-widest mt-2">Calendario FIFA real • visible para todos</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-3 w-full sm:w-auto">
           <SaveStatusPill status={saveStatus} />
-          <button onClick={downloadPredictionsPdf} className="flex items-center gap-2 rounded-lg border border-brand-gold/20 bg-brand-gold/10 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-brand-gold hover:bg-brand-gold/20 transition-colors">
+          <button onClick={downloadPredictionsPdf} className="flex items-center justify-center gap-2 rounded-lg border border-brand-gold/20 bg-brand-gold/10 px-4 py-3 sm:py-2 text-[10px] font-black uppercase tracking-widest text-brand-gold hover:bg-brand-gold/20 transition-colors">
             <FileDown className="w-4 h-4" /> PDF
           </button>
-          <button onClick={() => window.location.reload()} className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-brand-zinc-400 hover:text-white transition-colors group">
+          <button onClick={() => window.location.reload()} className="flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 text-[10px] font-black uppercase tracking-widest text-brand-zinc-400 hover:text-white transition-colors group">
             <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Recargar
           </button>
         </div>
       </div>
 
       {matches.length === 0 && (
-        <div className="dimension-card-accent p-8 text-center">
+        <div className="dimension-card-accent p-6 sm:p-8 text-center">
           <ShieldAlert className="w-10 h-10 text-brand-gold mx-auto mb-4" />
           <h2 className="text-xl font-black uppercase tracking-tighter mb-2">Falta sincronizar el calendario</h2>
           <p className="text-brand-zinc-400 text-sm">El admin debe lanzar la sincronización FIFA desde la vista Admin para cargar los 104 partidos.</p>
@@ -423,14 +423,14 @@ export default function Predictions({
         </div>
       )}
 
-      <section className="grid md:grid-cols-3 gap-3">
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <PhaseButton active={activeFilter === 'groups'} onClick={() => setActiveFilter('groups')} title="1. Partidos fase 1" date={formatDateTime(GROUP_DEADLINE_ISO)} status={groupsComplete ? 'Completo' : `${completedGroupPredictionCount}/${groupMatches.length || 72}`} />
         <PhaseButton active={activeFilter === 'scorers'} onClick={() => setActiveFilter('scorers')} title="2. Goleadores" date={formatDateTime(GROUP_DEADLINE_ISO)} status={scorerComplete ? 'Elegido' : 'Pendiente'} />
         <PhaseButton active={activeFilter === 'knockout'} onClick={() => setActiveFilter('knockout')} title="3. Fase eliminatoria" date={formatDateTime(KNOCKOUT_DEADLINE_ISO)} status="Cuadro" />
       </section>
 
       {activeFilter === 'groups' && (
-        <div className="rounded-2xl border border-brand-gold/20 bg-brand-gold/5 p-5 text-sm text-brand-zinc-300">
+        <div className="rounded-2xl border border-brand-gold/20 bg-brand-gold/5 p-4 sm:p-5 text-sm text-brand-zinc-300">
           <span className="font-black uppercase tracking-widest text-brand-gold">Fase 1:</span> introduce marcadores de grupos. La clasificación automática aparece al lado en escritorio y debajo en móvil.
         </div>
       )}
@@ -668,7 +668,7 @@ export default function Predictions({
 
 function ViewerNotice({ icon: Icon, title, text, action, onClick }: { icon: typeof Eye; title: string; text: string; action: string; onClick?: () => void }) {
   return (
-    <div className="dimension-card-accent p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+    <div className="dimension-card-accent p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
       <div className="flex gap-4">
         <div className="w-11 h-11 rounded-xl bg-brand-gold/10 border border-brand-gold/20 flex items-center justify-center shrink-0">
           <Icon className="w-5 h-5 text-brand-gold" />
@@ -678,7 +678,7 @@ function ViewerNotice({ icon: Icon, title, text, action, onClick }: { icon: type
           <p className="text-sm text-brand-zinc-400 mt-1">{text}</p>
         </div>
       </div>
-      {onClick && <button onClick={onClick} className="dimension-button-primary px-6 whitespace-nowrap">{action}</button>}
+      {onClick && <button onClick={onClick} className="dimension-button-primary w-full sm:w-auto px-6 whitespace-nowrap">{action}</button>}
     </div>
   );
 }
@@ -697,8 +697,8 @@ function SaveStatusPill({ status }: { status: SaveStatus }) {
 function PhaseButton({ active, onClick, title, date, status }: { active: boolean; onClick: () => void; title: string; date: string; status?: string }) {
   return (
     <button onClick={onClick} className={`rounded-xl border p-4 text-left transition-all ${active ? 'border-brand-gold bg-brand-gold/10 shadow-lg shadow-brand-gold/10' : 'border-white/10 bg-white/[0.03] hover:border-white/20'}`}>
-      <span className={`block text-sm font-black uppercase tracking-widest ${active ? 'text-brand-gold' : 'text-white'}`}>{title}</span>
-      <span className="mt-1 block text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">Cierre: {date}</span>
+      <span className={`block text-xs sm:text-sm font-black uppercase tracking-widest leading-tight ${active ? 'text-brand-gold' : 'text-white'}`}>{title}</span>
+      <span className="mt-1 block text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">Cierre: {date}</span>
       {status && <span className={`mt-3 inline-flex rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-widest ${active ? 'border-brand-gold/30 text-brand-gold' : 'border-white/10 text-brand-zinc-400'}`}>{status}</span>}
     </button>
   );

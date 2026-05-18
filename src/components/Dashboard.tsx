@@ -129,27 +129,27 @@ export default function Dashboard({
         </div>
       )}
 
-      <div className="dimension-card-accent p-8 sm:p-10 relative overflow-hidden">
+      <div className="dimension-card-accent p-5 sm:p-10 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-brand-gold/5 rounded-full blur-3xl -mr-32 -mt-16" />
         <div className="relative z-10 max-w-3xl">
           {community.logoUrl ? (
-            <img src={community.logoUrl || DIMENSION_LOGO_URL} alt={community.name} className={`h-20 w-auto object-contain mb-6 rounded-2xl ${community.name === 'Mundial 2026' ? 'bg-white/90 p-3 shadow-lg' : ''}`} />
+            <img src={community.logoUrl || DIMENSION_LOGO_URL} alt={community.name} className={`h-16 sm:h-20 w-auto object-contain mb-5 sm:mb-6 rounded-2xl ${community.name === 'Mundial 2026' ? 'bg-white/90 p-3 shadow-lg' : ''}`} />
           ) : (
             <div className="h-20 w-20 rounded-2xl bg-brand-gold text-black flex items-center justify-center font-black text-2xl mb-6 shadow-lg shadow-brand-gold/20">{community.logoText}</div>
           )}
-          <h2 className="text-4xl sm:text-6xl font-black uppercase tracking-tighter mb-6 leading-none">
+          <h2 className="text-3xl sm:text-6xl font-black uppercase tracking-tighter mb-5 sm:mb-6 leading-none">
             {community.name === 'Mundial 2026' ? (
               <>Mundial <span className="text-brand-gold">2026</span></>
             ) : (
               <>{community.shortName} <span className="text-brand-gold">Mundial</span></>
             )}
           </h2>
-          <p className="text-brand-zinc-400 text-sm sm:text-lg max-w-2xl leading-relaxed mb-8">
+          <p className="text-brand-zinc-400 text-sm sm:text-lg max-w-2xl leading-relaxed mb-6 sm:mb-8">
             Pronostica los 104 partidos reales del Mundial, elige tu goleador, acierta clasificados y compite en una clasificación actualizada con resultados oficiales.
           </p>
 
-          <div className="flex flex-wrap gap-4">
-            <button onClick={() => setActiveTab('predictions')} className="dimension-button-primary px-8 flex items-center gap-3 group">
+          <div className="grid grid-cols-1 sm:flex sm:flex-wrap gap-3 sm:gap-4">
+            <button onClick={() => setActiveTab('predictions')} className="dimension-button-primary px-8 flex items-center justify-center gap-3 group">
               Ver calendario
               <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </button>
@@ -190,7 +190,7 @@ export default function Dashboard({
       )}
 
       <section className="grid grid-cols-1 lg:grid-cols-[1fr_0.9fr] gap-8">
-        <div className="dimension-card p-8 border-brand-gold/10 bg-brand-gold/5">
+        <div className="dimension-card p-5 sm:p-8 border-brand-gold/10 bg-brand-gold/5">
           <div className="flex items-center gap-3 mb-6">
             <div className="w-1.5 h-6 bg-brand-gold rounded-full" />
             <h3 className="text-sm uppercase tracking-[0.2em] text-white font-black italic">Sistema de puntos</h3>
@@ -207,7 +207,7 @@ export default function Dashboard({
           </ul>
         </div>
 
-        <div className="dimension-card p-8 border-brand-gold/10">
+        <div className="dimension-card p-5 sm:p-8 border-brand-gold/10">
           <div className="flex items-center gap-3 mb-6">
             <div className="w-1.5 h-6 bg-brand-gold rounded-full" />
             <h3 className="text-sm uppercase tracking-[0.2em] text-white font-black italic">Fechas límite</h3>
