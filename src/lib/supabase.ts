@@ -2,8 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 import { ADMIN_EMAIL } from './constants';
 import type { Profile } from './types';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = cleanSupabaseUrl(import.meta.env.VITE_SUPABASE_URL);
+const supabaseAnonKey = cleanSupabaseKey(import.meta.env.VITE_SUPABASE_ANON_KEY);
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
@@ -33,4 +33,12 @@ export function profileStatusLabel(profile?: Profile | null) {
   if (profile.status === 'approved') return 'Cuenta aprobada';
   if (profile.status === 'blocked') return 'Cuenta bloqueada';
   return 'Pendiente de aprobación';
+}
+
+function cleanSupabaseUrl(value?: string) {
+  return value?.trim().match(/https:\/\/[a-z0-9-]+\.supabase\.co/i)?.[0] || '';
+}
+
+function cleanSupabaseKey(value?: string) {
+  return value?.trim().replace(/['"\s]/g, '') || '';
 }
