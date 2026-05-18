@@ -61,10 +61,22 @@ export default function Predictions({
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
-      const [{ data: matchRows }, { data: teamRows }] = await Promise.all([
+      let [{ data: matchRows, error: matchError }, { data: teamRows, error: teamError }] = await Promise.all([
         supabase.from('matches').select('*').order('kickoff_at', { ascending: true }),
         supabase.from('teams').select('*').order('group_code', { ascending: true }).order('name', { ascending: true }),
       ]);
+
+      if ((!matchRows || matchRows.length === 0) && !matchError) {
+        await supabase.functions.invoke('sync-fifa-matches');
+        [{ data: matchRows, error: matchError }, { data: teamRows, error: teamError }] = await Promise.all([
+          supabase.from('matches').select('*').order('kickoff_at', { ascending: true }),
+          supabase.from('teams').select('*').order('group_code', { ascending: true }).order('name', { ascending: true }),
+        ]);
+      }
+
+      if (matchError || teamError) {
+        console.warn('No se pudo cargar el calendario completo', matchError || teamError);
+      }
 
       setMatches((matchRows || []) as Match[]);
       setTeams((teamRows || []) as Team[]);
