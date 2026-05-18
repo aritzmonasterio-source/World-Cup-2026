@@ -5,8 +5,8 @@ declare const process: { env: Record<string, string | undefined> };
 export default async function handler(_request: any, response: any) {
   response.setHeader('Cache-Control', 'no-store, max-age=0');
 
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
-  const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
+  const supabaseUrl = cleanEnv(process.env.VITE_SUPABASE_URL);
+  const supabaseAnonKey = cleanEnv(process.env.VITE_SUPABASE_ANON_KEY);
 
   if (!supabaseUrl || !supabaseAnonKey) {
     response.status(500).json({ error: 'Missing Supabase public environment variables' });
@@ -25,4 +25,8 @@ export default async function handler(_request: any, response: any) {
   }
 
   response.status(200).json({ matches: matches || [], teams: teams || [] });
+}
+
+function cleanEnv(value?: string) {
+  return value?.trim().replace(/^['"]/, '').replace(/['"]$/, '');
 }
