@@ -5,7 +5,7 @@ import { motion } from 'motion/react';
 import { canPlay, supabase } from '../lib/supabase';
 import type { FinalistPrediction, KnockoutPrediction, Match, MatchPrediction, Profile, ScorerPrediction, Team } from '../lib/types';
 import { formatDateTime, GROUP_DEADLINE_ISO, isMatchLocked, KNOCKOUT_DEADLINE_ISO, POINTS } from '../lib/constants';
-import { displayTeam, getFlagUrl } from '../lib/flags';
+import { displayTeam, getFlagEmoji, getFlagUrl } from '../lib/flags';
 import { WORLD_CUP_LOGO_URL, getCommunity, type CommunityId } from '../lib/communities';
 import { SCORER_CANDIDATES } from '../lib/scorerCandidates';
 
@@ -887,8 +887,14 @@ function TeamSelect({ label, value, teams, locked, onChange }: { label: string; 
 
 function Flag({ code, name }: { code: string | null; name: string }) {
   return (
-    <div className="w-8 h-5 rounded-[2px] overflow-hidden border border-white/10 shrink-0">
-      <img src={getFlagUrl(name, code)} className="w-full h-full object-cover scale-125" alt="" />
+    <div className="relative w-8 h-5 rounded-[2px] overflow-hidden border border-white/10 shrink-0 bg-black/30 flex items-center justify-center">
+      <span className="text-base leading-none">{getFlagEmoji(name, code)}</span>
+      <img
+        src={getFlagUrl(name, code)}
+        className="absolute inset-0 w-full h-full object-cover scale-125"
+        alt=""
+        onError={(event) => { event.currentTarget.style.display = 'none'; }}
+      />
     </div>
   );
 }

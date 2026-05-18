@@ -1,4 +1,4 @@
-import { getDisplayTeamName, getFlagUrlByCode } from './constants';
+import { FLAG_COUNTRY_BY_TEAM_CODE, getDisplayTeamName, getFlagUrlByCode } from './constants';
 
 export function getFlagUrl(teamName?: string | null, code?: string | null) {
   return getFlagUrlByCode(code || inferCodeFromName(teamName));
@@ -6,6 +6,18 @@ export function getFlagUrl(teamName?: string | null, code?: string | null) {
 
 export function displayTeam(teamName?: string | null, code?: string | null) {
   return getDisplayTeamName(teamName, code);
+}
+
+export function getFlagEmoji(teamName?: string | null, code?: string | null) {
+  const teamCode = code || inferCodeFromName(teamName);
+  const country = teamCode ? FLAG_COUNTRY_BY_TEAM_CODE[teamCode] : null;
+  if (!country) return '🏳️';
+  if (country === 'gb-eng') return '🏴';
+  if (country === 'gb-sct') return '🏴';
+  if (country.length !== 2) return '🏳️';
+  return country
+    .toUpperCase()
+    .replace(/./g, (char) => String.fromCodePoint(127397 + char.charCodeAt(0)));
 }
 
 function inferCodeFromName(teamName?: string | null) {

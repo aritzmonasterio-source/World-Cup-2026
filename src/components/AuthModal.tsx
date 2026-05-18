@@ -30,6 +30,9 @@ export default function AuthModal({
   const [error, setError] = useState('');
   const googleEnabled = import.meta.env.VITE_ENABLE_GOOGLE_AUTH === 'true';
   const selectedCommunity = getCommunity(communityId);
+  const authRedirectUrl = window.location.origin.startsWith('file')
+    ? 'https://world-cup-2026-six-gules.vercel.app'
+    : window.location.origin;
 
   useEffect(() => {
     setCommunityId(selectedCommunityId);
@@ -69,23 +72,26 @@ export default function AuthModal({
         onRecoveryComplete?.();
         setTimeout(onClose, 900);
       } else if (isLogin) {
-        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+        const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
         if (signInError) throw signInError;
         onClose();
       } else {
+        if (username.trim().length < 2) throw new Error('Escribe un nombre de usuario.');
+        if (password.length < 6) throw new Error('La contraseña debe tener al menos 6 caracteres.');
         const { error: signUpError } = await supabase.auth.signUp({
-          email,
+          email: email.trim(),
           password,
           options: {
-            data: { username, community_id: communityId },
-            emailRedirectTo: window.location.origin,
+            data: { username: username.trim(), community_id: communityId },
+            emailRedirectTo: authRedirectUrl,
           },
         });
         if (signUpError) throw signUpError;
-        setMessage('Cuenta creada. Revisa tu email y espera la aprobación del admin para jugar.');
+        setIsLogin(true);
+        setMessage('Cuenta creada. Revisa tu email para confirmar la cuenta. Después el admin aprobará tu acceso.');
       }
     } catch (err: any) {
-      setError(err.message || 'No se pudo completar el acceso.');
+      setError(translateAuthError(err.message || 'No se pudo completar el acceso.'));
     } finally {
       setLoading(false);
     }
@@ -104,11 +110,11 @@ export default function AuthModal({
     }
     setLoading(true);
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: window.location.origin,
+      redirectTo: authRedirectUrl,
     });
     setLoading(false);
     if (resetError) {
-      setError(resetError.message);
+      setError(translateAuthError(resetError.message));
       return;
     }
     setMessage('Te he enviado un email para cambiar la contraseña. Abre el enlace desde este dispositivo.');
@@ -135,25 +141,25 @@ export default function AuthModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-[#161616]/95 backdrop-blur-md">
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto overflow-x-hidden p-2 sm:p-6 bg-[#161616]/95 backdrop-blur-md">
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         style={getCommunityThemeStyle(NEUTRAL_THEME)}
-        className="w-full max-w-xl max-h-[92vh] overflow-y-auto dimension-card bg-brand-black/40 p-8 sm:p-10 relative border-brand-gold/20"
+        className="my-2 sm:my-0 w-full max-w-[min(36rem,calc(100vw-1rem))] max-h-[calc(100dvh-1rem)] overflow-y-auto dimension-card bg-brand-black/40 p-4 sm:p-10 relative border-brand-gold/20"
       >
-        <button onClick={onClose} className="absolute top-6 right-6 text-brand-zinc-500 hover:text-brand-gold transition-colors">
-          <X className="w-6 h-6" />
+        <button onClick={onClose} className="absolute top-4 right-4 sm:top-6 sm:right-6 text-brand-zinc-500 hover:text-brand-gold transition-colors">
+          <X className="w-5 h-5 sm:w-6 sm:h-6" />
         </button>
 
-        <div className="text-center mb-10">
-          <div className="w-24 h-20 bg-black/20 border border-brand-gold/20 rounded-2xl mx-auto mb-6 flex items-center justify-center overflow-hidden">
-            <img src={NEUTRAL_THEME.logoUrl} alt="Mundial 2026" className="h-16 w-auto object-contain" />
+        <div className="text-center mb-5 sm:mb-10">
+          <div className="w-20 h-16 sm:w-24 sm:h-20 bg-black/20 border border-brand-gold/20 rounded-2xl mx-auto mb-4 sm:mb-6 flex items-center justify-center overflow-hidden">
+            <img src={NEUTRAL_THEME.logoUrl} alt="Mundial 2026" className="h-12 sm:h-16 w-auto object-contain" />
           </div>
-          <h2 className="text-3xl font-black uppercase tracking-tighter leading-none">
+          <h2 className="text-2xl sm:text-3xl font-black uppercase tracking-tighter leading-none">
             {forcePasswordRecovery ? 'Nueva clave' : isLogin ? 'Acceso' : 'Nuevo registro'} <span className="text-brand-gold">Juego</span>
           </h2>
-          <p className="text-[10px] text-brand-gold mt-3 uppercase font-black tracking-[0.4em] opacity-70">{selectedCommunity.name}</p>
+          <p className="text-[10px] text-brand-gold mt-3 uppercase font-black tracking-[0.25em] sm:tracking-[0.4em] opacity-70">{selectedCommunity.name}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -181,18 +187,18 @@ export default function AuthModal({
               <Users className="w-4 h-4" />
               <p className="text-[10px] font-black uppercase tracking-[0.22em]">Elige la comunidad en la que quieres jugar</p>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               {COMMUNITIES.map((community) => (
                 <button
                   key={community.id}
                   type="button"
                   onClick={() => setCommunityId(community.id)}
-                  className={`rounded-xl border p-3 text-left transition-all ${communityId === community.id ? 'border-brand-gold bg-brand-gold/10' : 'border-white/10 bg-white/[0.03] hover:border-brand-gold/40'}`}
+                  className={`rounded-xl border p-2 sm:p-3 text-left transition-all ${communityId === community.id ? 'border-brand-gold bg-brand-gold/10' : 'border-white/10 bg-white/[0.03] hover:border-brand-gold/40'}`}
                 >
-                  <div className="h-10 w-10 rounded-lg bg-black/30 border border-brand-gold/20 flex items-center justify-center overflow-hidden mb-3">
-                    {community.logoUrl ? <img src={community.logoUrl} alt="" className="h-8 w-auto object-contain" /> : <span className="text-xs font-black text-brand-gold">{community.logoText}</span>}
+                  <div className="h-9 w-9 sm:h-10 sm:w-10 rounded-lg bg-black/30 border border-brand-gold/20 flex items-center justify-center overflow-hidden mb-2 sm:mb-3">
+                    {community.logoUrl ? <img src={community.logoUrl} alt="" className="h-7 sm:h-8 w-auto object-contain" /> : <span className="text-xs font-black text-brand-gold">{community.logoText}</span>}
                   </div>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-white leading-tight">{community.name}</p>
+                  <p className="text-[8px] sm:text-[10px] font-black uppercase tracking-widest text-white leading-tight">{community.shortName}</p>
                 </button>
               ))}
             </div>
@@ -207,7 +213,8 @@ export default function AuthModal({
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required
-                className="w-full bg-black/40 border border-brand-gold/10 rounded-lg py-4 pl-12 pr-4 text-[10px] font-black uppercase tracking-[0.2em] focus:border-brand-gold outline-none transition-all placeholder:text-brand-zinc-600"
+                autoComplete="nickname"
+                className="w-full bg-black/40 border border-brand-gold/10 rounded-lg py-4 pl-12 pr-4 text-base sm:text-[10px] font-black uppercase tracking-[0.12em] sm:tracking-[0.2em] focus:border-brand-gold outline-none transition-all placeholder:text-brand-zinc-600"
               />
             </div>
           )}
@@ -220,7 +227,9 @@ export default function AuthModal({
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full bg-black/40 border border-brand-gold/10 rounded-lg py-4 pl-12 pr-4 text-[10px] font-black uppercase tracking-[0.2em] focus:border-brand-gold outline-none transition-all placeholder:text-brand-zinc-600"
+              autoComplete="email"
+              inputMode="email"
+              className="w-full bg-black/40 border border-brand-gold/10 rounded-lg py-4 pl-12 pr-4 text-base sm:text-[10px] font-black uppercase tracking-[0.12em] sm:tracking-[0.2em] focus:border-brand-gold outline-none transition-all placeholder:text-brand-zinc-600"
             />
           </div>}
 
@@ -233,7 +242,8 @@ export default function AuthModal({
               onChange={(e) => forcePasswordRecovery ? setNewPassword(e.target.value) : setPassword(e.target.value)}
               required
               minLength={6}
-              className="w-full bg-black/40 border border-brand-gold/10 rounded-lg py-4 pl-12 pr-4 text-[10px] font-black uppercase tracking-[0.2em] focus:border-brand-gold outline-none transition-all placeholder:text-brand-zinc-600"
+              autoComplete={isLogin ? 'current-password' : 'new-password'}
+              className="w-full bg-black/40 border border-brand-gold/10 rounded-lg py-4 pl-12 pr-4 text-base sm:text-[10px] font-black uppercase tracking-[0.12em] sm:tracking-[0.2em] focus:border-brand-gold outline-none transition-all placeholder:text-brand-zinc-600"
             />
           </div>
 
@@ -283,4 +293,14 @@ export default function AuthModal({
       </motion.div>
     </div>
   );
+}
+
+function translateAuthError(message: string) {
+  const lower = message.toLowerCase();
+  if (lower.includes('invalid login credentials')) return 'Email o contraseña incorrectos.';
+  if (lower.includes('email not confirmed')) return 'Falta confirmar el email. Revisa tu bandeja de entrada.';
+  if (lower.includes('already registered') || lower.includes('already been registered')) return 'Este email ya está registrado. Prueba a entrar o recupera la contraseña.';
+  if (lower.includes('password should be') || lower.includes('at least 6')) return 'La contraseña debe tener al menos 6 caracteres.';
+  if (lower.includes('unable to validate email')) return 'El email no parece válido.';
+  return message;
 }
