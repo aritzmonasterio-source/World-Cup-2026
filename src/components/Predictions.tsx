@@ -24,6 +24,20 @@ type PredictedStandingRow = {
   position: number;
 };
 
+async function fetchPublicCalendarFallback() {
+  try {
+    const response = await fetch('/api/public-data', { headers: { accept: 'application/json' } });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    return {
+      matches: (payload.matches || []) as Match[],
+      teams: (payload.teams || []) as Team[],
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default function Predictions({
   user,
   profile,
@@ -76,6 +90,13 @@ export default function Predictions({
 
       if (matchError || teamError) {
         console.warn('No se pudo cargar el calendario completo', matchError || teamError);
+        const fallback = await fetchPublicCalendarFallback();
+        if (fallback) {
+          matchRows = fallback.matches;
+          teamRows = fallback.teams;
+          matchError = null;
+          teamError = null;
+        }
       }
 
       setMatches((matchRows || []) as Match[]);
