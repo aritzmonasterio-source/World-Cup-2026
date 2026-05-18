@@ -190,6 +190,20 @@ export default function App() {
               </div>
             )}
 
+            {user && admin && (
+              <button
+                onClick={() => setActiveTab('admin')}
+                className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-2 text-[9px] font-black uppercase tracking-widest transition-all sm:px-3 ${
+                  activeTab === 'admin'
+                    ? 'border-brand-gold bg-brand-gold text-black'
+                    : 'border-brand-gold/25 bg-brand-gold/10 text-brand-gold hover:border-brand-gold/60'
+                }`}
+              >
+                <Shield className="h-3.5 w-3.5" />
+                Admin
+              </button>
+            )}
+
             {user && (
               <div className="text-right hidden sm:block">
                 <p className="text-[10px] uppercase text-brand-zinc-400 font-bold tracking-wider">{profileStatusLabel(profile)}</p>

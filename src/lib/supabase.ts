@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { ADMIN_EMAIL } from './constants';
+import { ADMIN_EMAIL, DEFAULT_ADMIN_EMAIL } from './constants';
 import type { Profile } from './types';
 
 const supabaseUrl = cleanSupabaseUrl(import.meta.env.VITE_SUPABASE_URL);
@@ -21,7 +21,8 @@ export const supabase = createClient(
 );
 
 export function isAdmin(profile?: Profile | null, email?: string | null) {
-  return profile?.role === 'admin' || email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  const normalizedEmail = normalizeEmail(email);
+  return profile?.role === 'admin' || normalizedEmail === ADMIN_EMAIL || normalizedEmail === DEFAULT_ADMIN_EMAIL;
 }
 
 export function canPlay(profile?: Profile | null, email?: string | null) {
@@ -41,4 +42,8 @@ function cleanSupabaseUrl(value?: string) {
 
 function cleanSupabaseKey(value?: string) {
   return value?.trim().replace(/['"\s]/g, '') || '';
+}
+
+function normalizeEmail(value?: string | null) {
+  return value?.trim().replace(/^['"]|['"]$/g, '').toLowerCase() || '';
 }

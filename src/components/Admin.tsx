@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
-import { CheckCircle2, Euro, Loader2, Mail, RefreshCw, Shield, UserCheck } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Euro, Loader2, Mail, RefreshCw, Shield, UserCheck } from 'lucide-react';
 import { isAdmin, supabase } from '../lib/supabase';
 import type { CommunityMembership, CommunitySettings, Match, Profile, Team } from '../lib/types';
 import { displayTeam } from '../lib/flags';
-import type { CommunityId } from '../lib/communities';
+import { getCommunity, type CommunityId } from '../lib/communities';
 
 type AdminMember = CommunityMembership & { profiles?: Profile };
 
@@ -21,8 +21,10 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
   const [goalCount, setGoalCount] = useState('0');
   const [settings, setSettings] = useState<CommunitySettings | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState('');
 
   const admin = isAdmin(profile, user?.email);
+  const community = getCommunity(communityId);
   const selectedMatch = useMemo(() => matches.find((match) => match.id === selectedMatchId), [matches, selectedMatchId]);
   const pendingMembers = useMemo(() => members.filter((member) => member.status === 'pending'), [members]);
   const approvedMembers = useMemo(() => members.filter((member) => member.status !== 'pending'), [members]);
@@ -37,12 +39,21 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
   }, [selectedMatch]);
 
   async function refresh() {
-    const [{ data: memberRows }, { data: matchRows }, { data: teamRows }, { data: settingsRow }] = await Promise.all([
+    setLoadError('');
+    const [membersResult, matchesResult, teamsResult, settingsResult] = await Promise.all([
       supabase.from('community_memberships').select('*, profiles(*)').eq('community_id', communityId).order('created_at', { ascending: false }),
       supabase.from('matches').select('*').order('kickoff_at', { ascending: true }),
       supabase.from('teams').select('*').order('name', { ascending: true }),
       supabase.from('community_settings').select('*').eq('community_id', communityId).maybeSingle(),
     ]);
+    const firstError = membersResult.error || matchesResult.error || teamsResult.error || settingsResult.error;
+    if (firstError) {
+      setLoadError(firstError.message);
+    }
+    const memberRows = membersResult.data;
+    const matchRows = matchesResult.data;
+    const teamRows = teamsResult.data;
+    const settingsRow = settingsResult.data;
     setMembers((memberRows || []) as AdminMember[]);
     setMatches((matchRows || []) as Match[]);
     setTeams((teamRows || []) as Team[]);
@@ -153,13 +164,25 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black uppercase tracking-tighter italic">Panel <span className="text-brand-gold">Admin</span></h1>
-          <p className="text-brand-zinc-500 text-xs font-bold uppercase tracking-widest mt-2">Usuarios, calendario, resultados y ranking</p>
+          <p className="text-brand-zinc-500 text-xs font-bold uppercase tracking-widest mt-2">
+            Usuarios, calendario, resultados y ranking de {community.name}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <AdminButton onClick={syncFifa} busy={busy === 'sync'} icon={RefreshCw}>Sincronizar FIFA</AdminButton>
           <AdminButton onClick={recalculate} busy={busy === 'recalculate'} icon={CheckCircle2}>Recalcular</AdminButton>
         </div>
       </div>
+
+      {loadError && (
+        <div className="rounded-2xl border border-red-400/25 bg-red-500/10 p-4 text-sm text-red-100 flex items-start gap-3">
+          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
+          <div>
+            <p className="font-black uppercase tracking-widest text-[10px] text-red-200">No se pudieron cargar todos los datos de admin</p>
+            <p className="mt-1 text-red-100/80">{loadError}</p>
+          </div>
+        </div>
+      )}
 
       <section className="dimension-card-accent p-6">
         <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
@@ -198,7 +221,10 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
 
       <section className="dimension-card-accent p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
-          <h2 className="text-lg font-black uppercase tracking-tighter italic flex items-center gap-3"><UserCheck className="w-5 h-5 text-brand-gold" /> Usuarios</h2>
+          <div>
+            <h2 className="text-lg font-black uppercase tracking-tighter italic flex items-center gap-3"><UserCheck className="w-5 h-5 text-brand-gold" /> Usuarios</h2>
+            <p className="mt-1 text-xs text-brand-zinc-500">Revisando altas de {community.name}. Cambia la comunidad arriba para validar otro grupo.</p>
+          </div>
           <div className="flex items-center gap-2 rounded-full border border-brand-gold/20 bg-brand-gold/10 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-brand-gold">
             <Mail className="w-3 h-3" /> {pendingMembers.length} pendientes
           </div>
@@ -211,6 +237,11 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
                 <MemberRow key={`${row.user_id}-${row.community_id}`} row={row} busy={busy === row.user_id} onUpdate={updateProfileStatus} highlight />
               ))}
             </div>
+          </div>
+        )}
+        {pendingMembers.length === 0 && (
+          <div className="mb-5 rounded-2xl border border-emerald-300/20 bg-emerald-400/10 p-4 text-sm text-emerald-100">
+            No hay usuarios pendientes en {community.name}. Si alguien se registró en otra comunidad, selecciónala en el desplegable superior.
           </div>
         )}
         <div className="grid gap-3">

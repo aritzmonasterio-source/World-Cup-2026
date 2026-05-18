@@ -1,7 +1,12 @@
 import type { Match } from './types';
 import dimensionLogo from '../assets/dimension-football-logo.png';
 
-export const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || 'aritzmonasterio@gmail.com';
+export const DEFAULT_ADMIN_EMAIL = 'aritzmonasterio@gmail.com';
+export const ADMIN_EMAIL = cleanEmail(import.meta.env.VITE_ADMIN_EMAIL) || DEFAULT_ADMIN_EMAIL;
+
+function cleanEmail(value?: string) {
+  return value?.trim().replace(/^['"]|['"]$/g, '').toLowerCase() || '';
+}
 
 export const FIFA_COMPETITION_ID = '17';
 export const FIFA_SEASON_ID = '285023';
