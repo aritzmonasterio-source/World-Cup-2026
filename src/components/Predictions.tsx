@@ -630,9 +630,9 @@ export default function Predictions({
                       initial={{ opacity: 0, y: 8 }}
                       whileInView={{ opacity: 1, y: 0 }}
                       viewport={{ once: true }}
-                      className={`grid grid-cols-1 md:grid-cols-[150px_1fr_112px_1fr_110px] items-center gap-3 p-4 rounded-xl border transition-all ${locked ? 'bg-white/[0.02] border-white/5' : 'bg-white/5 border-white/10 hover:border-brand-gold/30'}`}
+                      className={`grid grid-cols-[minmax(0,1fr)_88px_minmax(0,1fr)] md:grid-cols-[150px_1fr_112px_1fr_110px] items-center gap-3 p-4 rounded-xl border transition-all ${locked ? 'bg-white/[0.02] border-white/5' : 'bg-white/5 border-white/10 hover:border-brand-gold/30'}`}
                     >
-                      <div className="text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">
+                      <div className="col-span-3 md:col-span-1 text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">
                         <Clock className="w-3 h-3 inline mr-1 text-brand-gold" />
                         {formatDateTime(match.kickoff_at)}
                         <div className="mt-1 text-brand-zinc-500">
@@ -649,7 +649,7 @@ export default function Predictions({
                           onChange={(event) => handleScoreChange(match, 'home', event.target.value)}
                           onBlur={() => saveMatchPrediction(match)}
                           disabled={locked}
-                          className="w-10 h-10 bg-black/40 border border-brand-gold/30 rounded-lg text-center text-sm font-black focus:border-brand-gold outline-none disabled:opacity-40"
+                          className="w-9 h-9 sm:w-10 sm:h-10 bg-black/40 border border-brand-gold/30 rounded-lg text-center text-sm font-black focus:border-brand-gold outline-none disabled:opacity-40"
                         />
                         <span className="text-brand-gold/40 font-black text-xs">-</span>
                         <input
@@ -659,11 +659,11 @@ export default function Predictions({
                           onChange={(event) => handleScoreChange(match, 'away', event.target.value)}
                           onBlur={() => saveMatchPrediction(match)}
                           disabled={locked}
-                          className="w-10 h-10 bg-black/40 border border-brand-gold/30 rounded-lg text-center text-sm font-black focus:border-brand-gold outline-none disabled:opacity-40"
+                          className="w-9 h-9 sm:w-10 sm:h-10 bg-black/40 border border-brand-gold/30 rounded-lg text-center text-sm font-black focus:border-brand-gold outline-none disabled:opacity-40"
                         />
                       </div>
                       <TeamSide name={match.away_team_name} code={match.away_team_code} align="left" />
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="col-span-3 md:col-span-1 flex items-center justify-end gap-2">
                         {savingId === match.id ? <Loader2 className="w-4 h-4 animate-spin text-brand-gold" /> : marketClosed || !canEdit ? <Lock className="w-4 h-4 text-brand-zinc-500" /> : <CheckCircle2 className={`w-4 h-4 ${pred?.home_score !== undefined && pred?.away_score !== undefined ? 'text-emerald-400' : 'text-white/10'}`} />}
                       </div>
                     </motion.div>
@@ -797,9 +797,9 @@ function FinalistsPanel({
 
 function TeamSide({ name, code, align }: { name: string; code: string | null; align: 'left' | 'right' }) {
   return (
-    <div className={`flex items-center gap-3 ${align === 'right' ? 'md:justify-end' : 'md:justify-start'}`}>
+    <div className={`flex min-w-0 items-center gap-2 sm:gap-3 ${align === 'right' ? 'justify-end text-right' : 'justify-start text-left'}`}>
       {align === 'left' && <Flag code={code} name={name} />}
-      <span className={`text-xs font-black uppercase tracking-tight leading-tight ${align === 'right' ? 'md:text-right' : ''}`}>{displayTeam(name, code)}</span>
+      <span className="min-w-0 text-[10px] sm:text-xs font-black uppercase tracking-tight leading-tight break-words">{displayTeam(name, code)}</span>
       {align === 'right' && <Flag code={code} name={name} />}
     </div>
   );
