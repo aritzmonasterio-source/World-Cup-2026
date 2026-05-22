@@ -138,7 +138,7 @@ security definer
 set search_path = public
 as $$
 begin
-  delete from public.point_events;
+  delete from public.point_events where true;
 
   insert into public.point_events (user_id, community_id, category, points, ref_type, ref_id, label)
   select
@@ -441,7 +441,8 @@ begin
       points_qualified = 0,
       total_points = 0,
       previous_rank = cm.current_rank,
-      updated_at = now();
+      updated_at = now()
+  where true;
 
   update public.community_memberships cm
   set

@@ -35,15 +35,24 @@ Deno.serve(async () => {
 
   const supabase = createClient(supabaseUrl, serviceRole);
   const startedAt = new Date().toISOString();
-  const { data: syncRun } = await supabase.from('sync_runs').insert({ started_at: startedAt, source: 'fifa' }).select('id').single();
+  let syncRun: { id: string } | null = null;
 
   try {
+    const { data: syncRunData, error: syncRunError } = await supabase
+      .from('sync_runs')
+      .insert({ started_at: startedAt, source: 'fifa' })
+      .select('id')
+      .single();
+    assertNoError(syncRunError, 'sync_runs insert');
+    syncRun = syncRunData;
+
     const response = await fetch(FIFA_URL, {
       headers: { 'user-agent': 'WorldCup2026Predictor/1.0' },
     });
     if (!response.ok) throw new Error(`FIFA returned ${response.status}`);
     const payload = await response.json();
-    const results = payload.Results || [];
+    const results = readMatchResults(payload);
+    if (!results.length) throw new Error(`FIFA payload sin partidos. Keys: ${Object.keys(payload || {}).join(', ')}`);
 
     const teamRows = new Map<string, unknown>();
     const goalEvents: GoalEventRow[] = [];
@@ -52,13 +61,18 @@ Deno.serve(async () => {
       const away = normalizeTeam(match.Away);
       const groupCode = groupFromName(match.GroupName?.[0]?.Description);
       const matchNumber = numberOrNull(match.MatchNumber);
+      const matchId = readString(match.IdMatch) || readString(match.Id) || readString(match.MatchId);
+      const kickoffAt = readValidDate(match.Date || match.MatchDate || match.DateTime || match.MatchDateTime);
+      const localKickoffAt = readValidDate(match.LocalDate || match.LocalDateTime);
+      if (!matchId) throw new Error(`Partido FIFA sin IdMatch: ${JSON.stringify(match).slice(0, 300)}`);
+      if (!kickoffAt) throw new Error(`Partido FIFA sin fecha valida: ${matchId}`);
       if (home?.id) teamRows.set(home.id, { ...home, group_code: groupCode, raw: match.Home, updated_at: new Date().toISOString() });
       if (away?.id) teamRows.set(away.id, { ...away, group_code: groupCode, raw: match.Away, updated_at: new Date().toISOString() });
-      goalEvents.push(...extractGoalEvents(match, home, away, matchNumber));
+      goalEvents.push(...extractGoalEvents(match, matchId, home, away, matchNumber));
 
       return {
-        id: match.IdMatch,
-        fifa_match_id: match.IdMatch,
+        id: matchId,
+        fifa_match_id: matchId,
         match_number: matchNumber,
         round_number: numberOrNull(match.MatchDay) || roundFromStage(match.StageName?.[0]?.Description, match.MatchNumber),
         phase: phaseName(match),
@@ -70,8 +84,8 @@ Deno.serve(async () => {
         away_team_name: away?.name || placeholder(match.PlaceHolderB) || 'Por definir',
         home_team_code: home?.code || null,
         away_team_code: away?.code || null,
-        kickoff_at: match.Date,
-        local_kickoff_at: match.LocalDate || null,
+        kickoff_at: kickoffAt,
+        local_kickoff_at: localKickoffAt,
         venue: match.Stadium?.Name?.[0]?.Description || null,
         city: match.Stadium?.CityName?.[0]?.Description || null,
         tv_channel_es: inferTvChannel(numberOrNull(match.MatchNumber), numberOrNull(match.MatchDay) || roundFromStage(match.StageName?.[0]?.Description, match.MatchNumber), home?.code || null, away?.code || null),
@@ -80,7 +94,7 @@ Deno.serve(async () => {
         away_score: nullableNumber(match.AwayTeamScore),
         home_penalty_score: nullableNumber(match.HomeTeamPenaltyScore),
         away_penalty_score: nullableNumber(match.AwayTeamPenaltyScore),
-        winner_team_id: match.Winner || null,
+        winner_team_id: readString(match.Winner) || null,
         raw: match,
         synced_at: new Date().toISOString(),
       };
@@ -88,52 +102,56 @@ Deno.serve(async () => {
 
     if (teamRows.size) {
       const { error } = await supabase.from('teams').upsert(Array.from(teamRows.values()), { onConflict: 'id' });
-      if (error) throw error;
+      assertNoError(error, 'teams upsert');
     }
 
     const { error: matchesError } = await supabase.from('matches').upsert(matchRows, { onConflict: 'id' });
-    if (matchesError) throw matchesError;
+    assertNoError(matchesError, 'matches upsert');
 
     if (goalEvents.length) {
       const { error: eventsError } = await supabase
         .from('match_goal_events')
         .upsert(goalEvents, { onConflict: 'event_key' });
-      if (eventsError) throw eventsError;
+      assertNoError(eventsError, 'match_goal_events upsert');
 
       const { data: storedGoalEvents, error: storedGoalsError } = await supabase
         .from('match_goal_events')
         .select('player_name, team_id, team_name, team_code, own_goal');
-      if (storedGoalsError) throw storedGoalsError;
+      assertNoError(storedGoalsError, 'match_goal_events select');
 
       const aggregatedGoals = aggregateGoalEvents((storedGoalEvents || []) as GoalEventRow[]);
       if (aggregatedGoals.length) {
         const { error: goalsError } = await supabase
           .from('player_goals')
           .upsert(aggregatedGoals, { onConflict: 'player_key' });
-        if (goalsError) throw goalsError;
+        assertNoError(goalsError, 'player_goals upsert');
       }
     }
 
     const { error: tvError } = await supabase.rpc('recalculate_match_tv_channels');
-    if (tvError) throw tvError;
+    assertNoError(tvError, 'recalculate_match_tv_channels');
     const { error: pointsError } = await supabase.rpc('recalculate_points');
-    if (pointsError) throw pointsError;
-    await supabase.from('sync_runs').update({
+    assertNoError(pointsError, 'recalculate_points');
+    const { error: updateSyncRunError } = await supabase.from('sync_runs').update({
       ok: true,
       finished_at: new Date().toISOString(),
       matches_seen: results.length,
       matches_upserted: matchRows.length,
       raw: { continuation: payload.ContinuationToken ?? null },
     }).eq('id', syncRun?.id);
+    assertNoError(updateSyncRunError, 'sync_runs ok update');
 
     return Response.json({ ok: true, matches: matchRows.length });
   } catch (error) {
-    await supabase.from('sync_runs').update({
-      ok: false,
-      finished_at: new Date().toISOString(),
-      error: error instanceof Error ? error.message : String(error),
-    }).eq('id', syncRun?.id);
-    return new Response(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }), { status: 500 });
+    const message = describeError(error);
+    if (syncRun?.id) {
+      await supabase.from('sync_runs').update({
+        ok: false,
+        finished_at: new Date().toISOString(),
+        error: message,
+      }).eq('id', syncRun.id);
+    }
+    return new Response(JSON.stringify({ ok: false, error: message }), { status: 500 });
   }
 });
 
@@ -159,7 +177,7 @@ function normalizeTeam(team: any) {
   const code = team.Abbreviation || team.IdCountry || '';
   const name = TEAM_NAME_ES[code] || team.ShortClubName || team.TeamName?.[0]?.Description || code;
   return {
-    id: team.IdTeam || code,
+    id: readString(team.IdTeam) || code,
     code,
     name,
     flag_url: FLAG_BY_CODE[code] ? `https://flagcdn.com/w80/${FLAG_BY_CODE[code]}.png` : null,
@@ -228,7 +246,7 @@ function inferTvChannel(matchNumber: number | null, roundNumber: number | null, 
   return 'DAZN / Canal Mediapro';
 }
 
-function extractGoalEvents(match: any, home: NormalizedTeam, away: NormalizedTeam, matchNumber: number | null): GoalEventRow[] {
+function extractGoalEvents(match: any, matchId: string, home: NormalizedTeam, away: NormalizedTeam, matchNumber: number | null): GoalEventRow[] {
   const rows: GoalEventRow[] = [];
   const seen = new Set<string>();
   const now = new Date().toISOString();
@@ -244,14 +262,14 @@ function extractGoalEvents(match: any, home: NormalizedTeam, away: NormalizedTea
     const minute = readMinute(raw);
     const penalty = readBooleanish(raw.Penalty) || readBooleanish(raw.IsPenalty) || includesAny(readTextBlob(raw), ['penalty', 'penalti']);
     const ownGoal = readBooleanish(raw.OwnGoal) || readBooleanish(raw.IsOwnGoal) || includesAny(readTextBlob(raw), ['own goal', 'autogol']);
-    const eventKey = String(raw.IdEvent || raw.EventId || raw.IdMatchEvent || raw.IdGoal || `${match.IdMatch}:${playerName}:${minute ?? index}:${team?.id || team?.code || 'unknown'}`);
+    const eventKey = String(raw.IdEvent || raw.EventId || raw.IdMatchEvent || raw.IdGoal || `${matchId}:${playerName}:${minute ?? index}:${team?.id || team?.code || 'unknown'}`);
 
     if (seen.has(eventKey)) return;
     seen.add(eventKey);
 
     rows.push({
       event_key: eventKey,
-      match_id: match.IdMatch,
+      match_id: matchId,
       match_number: matchNumber,
       player_name: playerName,
       team_id: team?.id || null,
@@ -399,6 +417,39 @@ function readString(value: unknown) {
   if (typeof value === 'string' && value.trim()) return value.trim();
   if (typeof value === 'number') return String(value);
   return '';
+}
+
+function readMatchResults(payload: any): any[] {
+  const candidates = [
+    payload?.Results,
+    payload?.results,
+    payload?.Matches,
+    payload?.matches,
+    payload?.data?.Results,
+    payload?.data?.matches,
+  ];
+  return candidates.find(Array.isArray) || [];
+}
+
+function readValidDate(value: unknown) {
+  const text = readString(value);
+  if (!text) return null;
+  const timestamp = Date.parse(text);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
+function assertNoError(error: unknown, context: string) {
+  if (error) throw new Error(`${context}: ${describeError(error)}`);
+}
+
+function describeError(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  try {
+    return JSON.stringify(error, Object.getOwnPropertyNames(error));
+  } catch {
+    return String(error);
+  }
 }
 
 function readBooleanish(value: unknown) {
