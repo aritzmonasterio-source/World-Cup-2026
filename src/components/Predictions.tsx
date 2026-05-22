@@ -13,6 +13,12 @@ type MatchPredictionMap = Record<string, Partial<MatchPrediction>>;
 type KnockoutPredictionMap = Record<string, Partial<KnockoutPrediction>>;
 type FinalistSlot = 'champion' | 'runner_up' | 'third' | 'fourth';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+type PredictionDraft = {
+  matchPredictions?: MatchPredictionMap;
+  knockoutPredictions?: KnockoutPredictionMap;
+  finalistPrediction?: Partial<FinalistPrediction> | null;
+  scorerPrediction?: Partial<ScorerPrediction> | null;
+};
 type PredictedStandingRow = {
   teamId: string;
   teamName: string;
@@ -36,6 +42,53 @@ async function fetchPublicCalendarFallback() {
   } catch {
     return null;
   }
+}
+
+function predictionDraftKey(userId: string, communityId: CommunityId) {
+  return `wc26_prediction_draft:${userId}:${communityId}`;
+}
+
+function readPredictionDraft(userId: string, communityId: CommunityId): PredictionDraft {
+  try {
+    return JSON.parse(window.localStorage.getItem(predictionDraftKey(userId, communityId)) || '{}') as PredictionDraft;
+  } catch {
+    return {};
+  }
+}
+
+function writePredictionDraft(userId: string, communityId: CommunityId, patch: PredictionDraft) {
+  const current = readPredictionDraft(userId, communityId);
+  const next: PredictionDraft = {
+    ...current,
+    ...patch,
+    matchPredictions: {
+      ...(current.matchPredictions || {}),
+      ...(patch.matchPredictions || {}),
+    },
+    knockoutPredictions: {
+      ...(current.knockoutPredictions || {}),
+      ...(patch.knockoutPredictions || {}),
+    },
+  };
+  window.localStorage.setItem(predictionDraftKey(userId, communityId), JSON.stringify(next));
+}
+
+function isDraftNewer(draft?: { updated_at?: string | null }, remote?: { updated_at?: string | null }) {
+  if (!draft?.updated_at) return false;
+  if (!remote?.updated_at) return true;
+  return new Date(draft.updated_at).getTime() > new Date(remote.updated_at).getTime();
+}
+
+function mergePredictionDraft<T extends { updated_at?: string | null }>(remote: Record<string, T>, draft?: Record<string, T>) {
+  if (!draft) return remote;
+  return Object.entries(draft).reduce<Record<string, T>>((acc, [id, draftRow]) => {
+    acc[id] = isDraftNewer(draftRow, acc[id]) ? draftRow : acc[id];
+    return acc;
+  }, { ...remote });
+}
+
+function mergeSingleDraft<T extends { updated_at?: string | null }>(remote: T | null, draft?: T | null) {
+  return isDraftNewer(draft || undefined, remote || undefined) ? draft || null : remote;
 }
 
 export default function Predictions({
@@ -103,6 +156,7 @@ export default function Predictions({
       setTeams((teamRows || []) as Team[]);
 
       if (user) {
+        const draft = readPredictionDraft(user.id, communityId);
         const [{ data: predRows }, { data: knockoutRows }, { data: finalistRow }, { data: scorerRow }] = await Promise.all([
           supabase.from('match_predictions').select('*').eq('user_id', user.id).eq('community_id', communityId),
           supabase.from('knockout_predictions').select('*').eq('user_id', user.id).eq('community_id', communityId),
@@ -114,19 +168,24 @@ export default function Predictions({
         (predRows || []).forEach((p: any) => {
           pMap[p.match_id] = p;
         });
-        setMatchPredictions(pMap);
+        setMatchPredictions(mergePredictionDraft(pMap, draft.matchPredictions));
 
         const kMap: KnockoutPredictionMap = {};
         (knockoutRows || []).forEach((p: any) => {
           kMap[p.match_id] = p;
         });
-        setKnockoutPredictions(kMap);
-        setFinalistPrediction((finalistRow as FinalistPrediction | null) || null);
+        setKnockoutPredictions(mergePredictionDraft(kMap, draft.knockoutPredictions));
+        setFinalistPrediction(mergeSingleDraft((finalistRow as FinalistPrediction | null) || null, draft.finalistPrediction as FinalistPrediction | null));
 
-        if (scorerRow) {
-          setScorerPrediction(scorerRow as ScorerPrediction);
-          setScorerName((scorerRow as ScorerPrediction).player_name || '');
-          setScorerTeamId((scorerRow as ScorerPrediction).team_id || '');
+        const mergedScorer = mergeSingleDraft((scorerRow as ScorerPrediction | null) || null, draft.scorerPrediction as ScorerPrediction | null);
+        if (mergedScorer) {
+          setScorerPrediction(mergedScorer as ScorerPrediction);
+          setScorerName((mergedScorer as ScorerPrediction).player_name || '');
+          setScorerTeamId((mergedScorer as ScorerPrediction).team_id || '');
+        } else {
+          setScorerPrediction(null);
+          setScorerName('');
+          setScorerTeamId('');
         }
       } else {
         setMatchPredictions({});
@@ -141,6 +200,12 @@ export default function Predictions({
 
     fetchData();
   }, [user, communityId]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(autoSaveTimers.current).forEach((timer) => window.clearTimeout(timer));
+    };
+  }, []);
 
   const matchesByPhase = useMemo(() => {
     const grouped: Record<string, Match[]> = {};
@@ -192,17 +257,25 @@ export default function Predictions({
     autoSaveTimers.current[key] = window.setTimeout(callback, 650);
   };
 
+  const persistDraft = (patch: PredictionDraft) => {
+    if (!user) return;
+    writePredictionDraft(user.id, communityId, patch);
+  };
+
   const handleScoreChange = (match: Match, side: 'home' | 'away', value: string) => {
     const score = value === '' ? undefined : Number(value);
     if (score !== undefined && (!Number.isInteger(score) || score < 0 || score > 30)) return;
+    const updatedAt = new Date().toISOString();
     const nextPred = {
       ...matchPredictions[match.id],
       [side === 'home' ? 'home_score' : 'away_score']: score,
+      updated_at: updatedAt,
     };
     setMatchPredictions((prev) => ({
       ...prev,
       [match.id]: nextPred,
     }));
+    persistDraft({ matchPredictions: { [match.id]: nextPred } });
     if (nextPred.home_score !== undefined && nextPred.away_score !== undefined) {
       scheduleAutoSave(`match-${match.id}`, () => saveMatchPrediction(match, nextPred));
     }
@@ -215,13 +288,14 @@ export default function Predictions({
     if (pred?.home_score === undefined || pred?.away_score === undefined) return;
 
     setSavingId(match.id);
+    const updatedAt = pred.updated_at || new Date().toISOString();
     const { error } = await supabase.from('match_predictions').upsert({
       user_id: user.id,
       community_id: communityId,
       match_id: match.id,
       home_score: pred.home_score,
       away_score: pred.away_score,
-      updated_at: new Date().toISOString(),
+      updated_at: updatedAt,
     }, { onConflict: 'user_id,community_id,match_id' });
 
     if (error) alert(error.message);
@@ -232,17 +306,20 @@ export default function Predictions({
 
   const updateKnockoutPick = (matchId: string, side: 'home' | 'away', teamId: string) => {
     const team = teams.find((item) => item.id === teamId);
+    const updatedAt = new Date().toISOString();
     const nextPick = {
       ...knockoutPredictions[matchId],
       match_id: matchId,
       [`predicted_${side}_team_id`]: team?.id || null,
       [`predicted_${side}_team_name`]: team?.name || null,
       [`predicted_${side}_team_code`]: team?.code || null,
+      updated_at: updatedAt,
     };
     setKnockoutPredictions((prev) => ({
       ...prev,
       [matchId]: nextPick,
     }));
+    persistDraft({ knockoutPredictions: { [matchId]: nextPick } });
     const match = matches.find((item) => item.id === matchId);
     if (match && nextPick.predicted_home_team_id && nextPick.predicted_away_team_id && nextPick.predicted_home_team_id !== nextPick.predicted_away_team_id) {
       scheduleAutoSave(`ko-${matchId}`, () => saveKnockoutPrediction(match, nextPick));
@@ -256,6 +333,7 @@ export default function Predictions({
     if (!pred?.predicted_home_team_id || !pred?.predicted_away_team_id || pred.predicted_home_team_id === pred.predicted_away_team_id) return;
 
     setSavingId(`ko-${match.id}`);
+    const updatedAt = pred.updated_at || new Date().toISOString();
     const { error } = await supabase.from('knockout_predictions').upsert({
       user_id: user.id,
       community_id: communityId,
@@ -266,7 +344,7 @@ export default function Predictions({
       predicted_away_team_id: pred.predicted_away_team_id,
       predicted_away_team_name: pred.predicted_away_team_name,
       predicted_away_team_code: pred.predicted_away_team_code,
-      updated_at: new Date().toISOString(),
+      updated_at: updatedAt,
     }, { onConflict: 'user_id,community_id,match_id' });
 
     if (error) alert(error.message);
@@ -277,13 +355,16 @@ export default function Predictions({
 
   const updateFinalistPick = (slot: FinalistSlot, teamId: string) => {
     const team = teams.find((item) => item.id === teamId);
+    const updatedAt = new Date().toISOString();
     const nextPick = {
       ...finalistPrediction,
       [`${slot}_team_id`]: team?.id || null,
       [`${slot}_team_name`]: team?.name || null,
       [`${slot}_team_code`]: team?.code || null,
+      updated_at: updatedAt,
     };
     setFinalistPrediction(nextPick);
+    persistDraft({ finalistPrediction: nextPick });
     scheduleAutoSave('finalists', () => saveFinalists(nextPick));
   };
 
@@ -292,6 +373,7 @@ export default function Predictions({
     if (!canEdit || new Date() > new Date(KNOCKOUT_DEADLINE_ISO)) return;
     const pick = override || finalistPrediction || {};
     setSavingId('finalists');
+    const updatedAt = pick.updated_at || new Date().toISOString();
     const { error } = await supabase.from('finalist_predictions').upsert({
       user_id: user.id,
       community_id: communityId,
@@ -307,7 +389,7 @@ export default function Predictions({
       fourth_team_id: pick.fourth_team_id || null,
       fourth_team_name: pick.fourth_team_name || null,
       fourth_team_code: pick.fourth_team_code || null,
-      updated_at: new Date().toISOString(),
+      updated_at: updatedAt,
     }, { onConflict: 'user_id,community_id' });
 
     if (error) alert(error.message);
@@ -323,14 +405,18 @@ export default function Predictions({
     if (!overrideName.trim()) return;
 
     setSavingId('scorer');
-    const { data, error } = await supabase.from('scorer_predictions').upsert({
-      user_id: user.id,
-      community_id: communityId,
+    const nextScorer = {
       player_name: overrideName.trim(),
       team_id: team?.id || null,
       team_name: team?.name || null,
       team_code: team?.code || null,
       updated_at: new Date().toISOString(),
+    };
+    persistDraft({ scorerPrediction: nextScorer });
+    const { data, error } = await supabase.from('scorer_predictions').upsert({
+      user_id: user.id,
+      community_id: communityId,
+      ...nextScorer,
     }, { onConflict: 'user_id,community_id' }).select('*').single();
 
     if (error) alert(error.message);
@@ -478,6 +564,16 @@ export default function Predictions({
             value={scorerName}
             onChange={(event) => {
               setScorerName(event.target.value);
+              const team = teams.find((item) => item.id === scorerTeamId);
+              persistDraft({
+                scorerPrediction: {
+                  player_name: event.target.value.trim(),
+                  team_id: team?.id || null,
+                  team_name: team?.name || null,
+                  team_code: team?.code || null,
+                  updated_at: new Date().toISOString(),
+                },
+              });
               scheduleAutoSave('scorer', () => saveScorer(event.target.value, scorerTeamId));
             }}
             placeholder="Nombre del jugador"
@@ -488,6 +584,16 @@ export default function Predictions({
             value={scorerTeamId}
             onChange={(event) => {
               setScorerTeamId(event.target.value);
+              const team = teams.find((item) => item.id === event.target.value);
+              persistDraft({
+                scorerPrediction: {
+                  player_name: scorerName.trim(),
+                  team_id: team?.id || null,
+                  team_name: team?.name || null,
+                  team_code: team?.code || null,
+                  updated_at: new Date().toISOString(),
+                },
+              });
               scheduleAutoSave('scorer', () => saveScorer(scorerName, event.target.value));
             }}
             disabled={!canEdit || new Date() > new Date(GROUP_DEADLINE_ISO)}
@@ -517,6 +623,15 @@ export default function Predictions({
                 onClick={() => {
                   setScorerName(candidate.name);
                   setScorerTeamId(team?.id || '');
+                  persistDraft({
+                    scorerPrediction: {
+                      player_name: candidate.name,
+                      team_id: team?.id || null,
+                      team_name: team?.name || null,
+                      team_code: team?.code || null,
+                      updated_at: new Date().toISOString(),
+                    },
+                  });
                   scheduleAutoSave('scorer', () => saveScorer(candidate.name, team?.id || ''));
                 }}
                 className={`group overflow-hidden rounded-xl border text-left transition-all disabled:opacity-40 ${selected ? 'border-brand-gold bg-brand-gold/10 shadow-lg shadow-brand-gold/10' : 'border-white/10 bg-white/[0.03] hover:border-brand-gold/40'}`}

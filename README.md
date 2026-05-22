@@ -6,7 +6,7 @@ Incluye tres comunidades independientes dentro del mismo entorno:
 
 - Dimension Football: estética oro/antracita y logo propio.
 - Athletic Club: estética negro, rojo y gris antracita.
-- Otra Liga: estética oscura, blanco y verde eléctrico.
+- Crossfit 7AM: estética azul noche, blanco y naranja.
 
 ## Stack
 

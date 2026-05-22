@@ -1,5 +1,6 @@
 import dimensionLogo from '../assets/dimension-football-logo.png';
 import athleticLogo from '../assets/athletic-club-logo.jpg';
+import crossfitLogo from '../assets/crossfit-7am-logo.jpg';
 import worldCupLogo from '../assets/world-cup-2026-logo.png';
 import type { CSSProperties } from 'react';
 
@@ -68,20 +69,21 @@ export const COMMUNITIES: CommunityTheme[] = [
   },
   {
     id: 'electric-league',
-    name: 'Otra Liga',
-    shortName: 'Liga Verde',
-    description: 'Comunidad neutra con oscuro, blanco y verde eléctrico.',
-    logoText: 'OL',
+    name: 'Crossfit 7AM',
+    shortName: 'Crossfit 7AM',
+    description: 'Comunidad Crossfit 7AM con blanco, azul noche y naranja.',
+    logoUrl: crossfitLogo,
+    logoText: '7AM',
     colors: {
-      bg: '#111714',
-      black: '#070a09',
-      gold: '#39ff88',
+      bg: '#111742',
+      black: '#070b22',
+      gold: '#ff9514',
       accent: '#ffffff',
-      zinc900: '#121614',
-      zinc800: '#1d2621',
-      zinc700: '#334139',
-      zinc500: '#7b8b82',
-      zinc400: '#d8e3dd',
+      zinc900: '#10163a',
+      zinc800: '#16204f',
+      zinc700: '#26366f',
+      zinc500: '#8391b9',
+      zinc400: '#f5f7ff',
     },
   },
 ];

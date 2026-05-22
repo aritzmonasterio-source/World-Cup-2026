@@ -100,7 +100,12 @@ Deno.serve(async () => {
         .upsert(goalEvents, { onConflict: 'event_key' });
       if (eventsError) throw eventsError;
 
-      const aggregatedGoals = aggregateGoalEvents(goalEvents);
+      const { data: storedGoalEvents, error: storedGoalsError } = await supabase
+        .from('match_goal_events')
+        .select('player_name, team_id, team_name, team_code, own_goal');
+      if (storedGoalsError) throw storedGoalsError;
+
+      const aggregatedGoals = aggregateGoalEvents((storedGoalEvents || []) as GoalEventRow[]);
       if (aggregatedGoals.length) {
         const { error: goalsError } = await supabase
           .from('player_goals')
@@ -109,8 +114,10 @@ Deno.serve(async () => {
       }
     }
 
-    await supabase.rpc('recalculate_match_tv_channels');
-    await supabase.rpc('recalculate_points');
+    const { error: tvError } = await supabase.rpc('recalculate_match_tv_channels');
+    if (tvError) throw tvError;
+    const { error: pointsError } = await supabase.rpc('recalculate_points');
+    if (pointsError) throw pointsError;
     await supabase.from('sync_runs').update({
       ok: true,
       finished_at: new Date().toISOString(),

@@ -225,12 +225,12 @@ export default function AuthModal({
               <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-gold/40 group-focus-within:text-brand-gold transition-colors" />
               <input
                 type="text"
-                placeholder="NOMBRE DE USUARIO"
+                placeholder="Nombre de usuario"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required
                 autoComplete="nickname"
-                className="w-full bg-black/40 border border-brand-gold/10 rounded-lg py-4 pl-12 pr-4 text-base sm:text-[10px] font-black uppercase tracking-[0.12em] sm:tracking-[0.2em] focus:border-brand-gold outline-none transition-all placeholder:text-brand-zinc-600"
+                className="w-full bg-black/40 border border-brand-gold/10 rounded-lg py-4 pl-12 pr-4 text-base font-bold tracking-normal focus:border-brand-gold outline-none transition-all placeholder:text-brand-zinc-600"
               />
             </div>
           )}
@@ -239,13 +239,13 @@ export default function AuthModal({
             <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-gold/40 group-focus-within:text-brand-gold transition-colors" />
             <input
               type="email"
-              placeholder="TU EMAIL"
+              placeholder="Tu email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
               inputMode="email"
-              className="w-full bg-black/40 border border-brand-gold/10 rounded-lg py-4 pl-12 pr-4 text-base sm:text-[10px] font-black uppercase tracking-[0.12em] sm:tracking-[0.2em] focus:border-brand-gold outline-none transition-all placeholder:text-brand-zinc-600"
+              className="w-full bg-black/40 border border-brand-gold/10 rounded-lg py-4 pl-12 pr-4 text-base font-bold tracking-normal focus:border-brand-gold outline-none transition-all placeholder:text-brand-zinc-600"
             />
           </div>}
 
@@ -253,13 +253,13 @@ export default function AuthModal({
             <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-gold/40 group-focus-within:text-brand-gold transition-colors" />
             <input
               type="password"
-              placeholder={forcePasswordRecovery ? 'NUEVA CONTRASEÑA' : 'TU CONTRASEÑA'}
+              placeholder={forcePasswordRecovery ? 'Nueva contraseña' : 'Tu contraseña'}
               value={forcePasswordRecovery ? newPassword : password}
               onChange={(e) => forcePasswordRecovery ? setNewPassword(e.target.value) : setPassword(e.target.value)}
               required
               minLength={6}
               autoComplete={isLogin ? 'current-password' : 'new-password'}
-              className="w-full bg-black/40 border border-brand-gold/10 rounded-lg py-4 pl-12 pr-4 text-base sm:text-[10px] font-black uppercase tracking-[0.12em] sm:tracking-[0.2em] focus:border-brand-gold outline-none transition-all placeholder:text-brand-zinc-600"
+              className="w-full bg-black/40 border border-brand-gold/10 rounded-lg py-4 pl-12 pr-4 text-base font-bold tracking-normal focus:border-brand-gold outline-none transition-all placeholder:text-brand-zinc-600"
             />
           </div>
 

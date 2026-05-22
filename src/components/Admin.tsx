@@ -22,6 +22,7 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
   const [settings, setSettings] = useState<CommunitySettings | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [loadError, setLoadError] = useState('');
+  const [adminNotice, setAdminNotice] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
 
   const admin = isAdmin(profile, user?.email);
   const community = getCommunity(communityId);
@@ -85,17 +86,30 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
   }
 
   async function syncFifa() {
+    setAdminNotice(null);
     setBusy('sync');
     const { error } = await supabase.functions.invoke('sync-fifa-matches');
-    if (error) alert(error.message);
+    setAdminNotice(error
+      ? { type: 'error', text: `No se pudo sincronizar FIFA: ${error.message}` }
+      : { type: 'ok', text: 'Calendario y resultados sincronizados. Puntuación recalculada.' });
     await refresh();
     setBusy(null);
   }
 
-  async function recalculate() {
+  async function recalculate(syncFirst = false) {
+    setAdminNotice(null);
     setBusy('recalculate');
+    let syncError = '';
+    if (syncFirst) {
+      const { error } = await supabase.functions.invoke('sync-fifa-matches');
+      syncError = error?.message || '';
+    }
     const { error } = await supabase.rpc('recalculate_points');
-    if (error) alert(error.message);
+    setAdminNotice(error
+      ? { type: 'error', text: `Error al calcular puntos: ${error.message}` }
+      : syncError
+        ? { type: 'error', text: `Puntos recalculados con datos actuales, pero FIFA no respondió: ${syncError}` }
+        : { type: 'ok', text: 'Puntos recalculados correctamente con los datos disponibles.' });
     await refresh();
     setBusy(null);
   }
@@ -111,7 +125,7 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
       synced_at: new Date().toISOString(),
     }).eq('id', selectedMatch.id);
     if (error) alert(error.message);
-    await recalculate();
+    await recalculate(false);
     setBusy(null);
   }
 
@@ -130,7 +144,7 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
       updated_at: new Date().toISOString(),
     }, { onConflict: 'player_key' });
     if (error) alert(error.message);
-    await recalculate();
+    await recalculate(false);
     setBusy(null);
   }
 
@@ -170,9 +184,20 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
         </div>
         <div className="flex flex-wrap gap-2">
           <AdminButton onClick={syncFifa} busy={busy === 'sync'} icon={RefreshCw}>Sincronizar FIFA</AdminButton>
-          <AdminButton onClick={recalculate} busy={busy === 'recalculate'} icon={CheckCircle2}>Recalcular</AdminButton>
+          <AdminButton onClick={() => recalculate(true)} busy={busy === 'recalculate'} icon={CheckCircle2}>Actualizar y recalcular</AdminButton>
         </div>
       </div>
+
+      {adminNotice && (
+        <div className={`rounded-2xl border p-4 text-sm flex items-start gap-3 ${
+          adminNotice.type === 'ok'
+            ? 'border-emerald-400/25 bg-emerald-500/10 text-emerald-100'
+            : 'border-red-400/25 bg-red-500/10 text-red-100'
+        }`}>
+          {adminNotice.type === 'ok' ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" /> : <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />}
+          <p>{adminNotice.text}</p>
+        </div>
+      )}
 
       {loadError && (
         <div className="rounded-2xl border border-red-400/25 bg-red-500/10 p-4 text-sm text-red-100 flex items-start gap-3">
