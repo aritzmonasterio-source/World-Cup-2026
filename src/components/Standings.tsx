@@ -4,8 +4,9 @@ import { AnimatePresence, motion } from 'motion/react';
 import { supabase } from '../lib/supabase';
 import { isSupabaseConfigured } from '../lib/supabase';
 import type { Match } from '../lib/types';
-import { displayTeam, getFlagUrl } from '../lib/flags';
+import { displayTeam } from '../lib/flags';
 import ConfigRequired from './ConfigRequired';
+import TeamFlag from './TeamFlag';
 
 interface StandingTeam {
   id: string;
@@ -83,9 +84,7 @@ export default function Standings() {
                         <td className="px-6 py-5"><span className={`text-sm font-black italic ${idx < 2 ? 'text-brand-gold' : 'text-brand-zinc-600'}`}>{idx + 1}</span></td>
                         <td className="px-6 py-5">
                           <div className="flex items-center gap-4">
-                            <div className="relative w-10 h-7 rounded-md overflow-hidden bg-white/5 border border-white/10">
-                              <img src={getFlagUrl(team.name, team.code)} className="w-full h-full object-cover scale-150" alt="" />
-                            </div>
+                            <TeamFlag name={team.name} code={team.code} className="w-10 h-7 rounded-md bg-white/5" imageClassName="scale-150" emojiClassName="text-lg" />
                             <span className="text-sm font-black uppercase tracking-tight text-white group-hover:text-brand-gold transition-colors">{displayTeam(team.name, team.code)}</span>
                           </div>
                         </td>

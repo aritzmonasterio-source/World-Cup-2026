@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Loader2, Medal, Target, Trophy } from 'lucide-react';
 import { motion } from 'motion/react';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
-import { displayTeam, getFlagUrl } from '../lib/flags';
+import { displayTeam } from '../lib/flags';
 import ConfigRequired from './ConfigRequired';
+import TeamFlag from './TeamFlag';
 
 interface PlayerGoal {
   player_key: string;
@@ -201,9 +202,5 @@ function StatPill({ label, value }: { label: string; value: number }) {
 }
 
 function Flag({ name, code }: { name: string; code: string | null }) {
-  return (
-    <div className="h-6 w-9 shrink-0 overflow-hidden rounded-[3px] border border-white/10 bg-white/5">
-      <img src={getFlagUrl(name, code)} className="h-full w-full object-cover scale-125" alt="" />
-    </div>
-  );
+  return <TeamFlag name={name} code={code} className="h-6 w-9 bg-white/5" imageClassName="scale-125" />;
 }

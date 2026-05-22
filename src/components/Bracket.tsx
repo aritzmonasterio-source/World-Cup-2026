@@ -3,8 +3,9 @@ import { CalendarDays, Loader2, Trophy, Tv } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { isSupabaseConfigured } from '../lib/supabase';
 import type { Match } from '../lib/types';
-import { displayTeam, getFlagUrl } from '../lib/flags';
+import { displayTeam } from '../lib/flags';
 import ConfigRequired from './ConfigRequired';
+import TeamFlag from './TeamFlag';
 
 const ROUND_LABELS: Record<number, string> = {
   4: 'Dieciseisavos',
@@ -108,9 +109,7 @@ function TeamRow({ name, code, score, winner }: { name: string; code: string | n
   return (
     <div className="flex items-center justify-between gap-2">
       <div className="flex min-w-0 items-center gap-2">
-        <div className="h-4 w-6 shrink-0 overflow-hidden rounded-[2px] border border-white/10 bg-white/5">
-          <img src={getFlagUrl(name, code)} alt="" className="h-full w-full object-cover scale-125" />
-        </div>
+        <TeamFlag name={name} code={code} className="h-4 w-6 rounded-[2px] bg-white/5" imageClassName="scale-125" emojiClassName="text-xs" />
         <span className={`truncate text-[9px] font-bold uppercase tracking-tighter transition-colors ${winner ? 'text-brand-gold' : 'text-brand-zinc-400 group-hover:text-white'}`}>
           {displayTeam(name, code)}
         </span>

@@ -137,8 +137,9 @@ export function getDisplayTeamName(name?: string | null, code?: string | null) {
 }
 
 export function getFlagUrlByCode(code?: string | null) {
-  const country = code ? FLAG_COUNTRY_BY_TEAM_CODE[code] : null;
-  return country ? `https://flagcdn.com/w80/${country}.png` : 'https://flagcdn.com/w80/un.png';
+  const normalizedCode = code?.trim().toUpperCase() || '';
+  const country = normalizedCode ? FLAG_COUNTRY_BY_TEAM_CODE[normalizedCode] : null;
+  return country ? `https://flagcdn.com/w80/${country}.png` : '';
 }
 
 export function getDeadlineForMatch(match: Pick<Match, 'round_number' | 'phase' | 'kickoff_at'>) {
