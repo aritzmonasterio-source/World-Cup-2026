@@ -1,5 +1,12 @@
-const CACHE_NAME = 'mundial-2026-runtime-v2';
-const STATIC_ASSETS = ['/manifest.webmanifest', '/icons/world-cup-2026-icon-white.png'];
+const CACHE_NAME = 'mundial-2026-runtime-v3';
+const STATIC_ASSETS = [
+  '/manifest.webmanifest',
+  '/icons/apple-touch-icon.png',
+  '/icons/favicon-32.png',
+  '/icons/world-cup-2026-icon-white.png',
+  '/icons/world-cup-2026-icon-white-192.png',
+  '/icons/world-cup-2026-icon-white-512.png',
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)));
