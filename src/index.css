@@ -22,6 +22,7 @@
   #root {
     width: 100%;
     min-height: 100%;
+    background-color: var(--color-brand-gray);
     overflow-x: hidden;
     -webkit-text-size-adjust: 100%;
   }
@@ -29,6 +30,13 @@
   body {
     @apply bg-brand-gray text-white font-sans antialiased;
     min-width: 320px;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  #root {
+    min-height: 100vh;
+    min-height: 100dvh;
   }
 
   input,

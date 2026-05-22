@@ -36,6 +36,18 @@ export default function App() {
   };
 
   useEffect(() => {
+    const themeStyle = getCommunityThemeStyle(activeTheme) as Record<string, string>;
+    Object.entries(themeStyle).forEach(([property, value]) => {
+      document.documentElement.style.setProperty(property, value);
+    });
+    document.documentElement.style.backgroundColor = activeTheme.colors.bg;
+    document.body.style.backgroundColor = activeTheme.colors.bg;
+
+    const themeMeta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+    themeMeta?.setAttribute('content', activeTheme.colors.bg);
+  }, [activeTheme]);
+
+  useEffect(() => {
     let mounted = true;
     const startupTimer = window.setTimeout(() => {
       if (mounted) setLoading(false);
@@ -143,7 +155,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center bg-brand-gray">
+      <div className="h-screen min-h-dvh w-screen flex items-center justify-center bg-brand-gray" style={getCommunityThemeStyle(activeTheme)}>
         <motion.div animate={{ opacity: [0.5, 1, 0.5] }} transition={{ repeat: Infinity, duration: 1.5 }} className="flex flex-col items-center gap-6">
           <div className="w-20 h-20 rounded-2xl border border-brand-gold/30 bg-brand-gold/10 flex items-center justify-center">
             <Trophy className="w-10 h-10 text-brand-gold" />
@@ -155,8 +167,8 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden pb-28 sm:pb-24 bg-brand-gray" style={getCommunityThemeStyle(activeTheme)}>
-      <header className="fixed top-0 w-full bg-brand-gray/95 backdrop-blur-xl border-b border-brand-gold/10 z-40">
+    <div className="min-h-screen min-h-dvh overflow-x-hidden pb-28 sm:pb-24 bg-brand-gray" style={getCommunityThemeStyle(activeTheme)}>
+      <header className="fixed top-0 w-full bg-brand-gray/95 backdrop-blur-xl border-b border-brand-gold/10 z-40 pt-[env(safe-area-inset-top)]">
         <div className="max-w-6xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
           <button onClick={() => setActiveTab('dashboard')} className="flex items-center gap-4 text-left">
             <div className={`h-10 w-10 sm:h-14 sm:w-14 rounded-xl border border-brand-gold/20 flex items-center justify-center overflow-hidden shadow-[0_0_30px_rgba(174,156,80,0.2)] ${showingNeutralWorldLogo ? 'bg-white/90 p-1.5' : 'bg-black/20'}`}>
@@ -240,7 +252,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-3 sm:px-6 pt-20 sm:pt-28 pb-14 sm:pb-12">
+      <main className="max-w-6xl mx-auto px-3 sm:px-6 pt-[calc(5rem+env(safe-area-inset-top))] sm:pt-[calc(7rem+env(safe-area-inset-top))] pb-14 sm:pb-12">
         {!isSupabaseConfigured && (
           <div className="mb-8 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-5 text-sm text-amber-100">
             Falta configurar Supabase. Crea `.env.local` con `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` para activar login, datos y ranking.
