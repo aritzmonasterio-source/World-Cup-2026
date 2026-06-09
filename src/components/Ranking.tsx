@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { Activity, AlertCircle, ArrowDown, ArrowUp, CheckCircle2, Loader2, Minus, RefreshCw, Trophy } from 'lucide-react';
 import { isAdmin, supabase } from '../lib/supabase';
@@ -56,6 +56,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
   if (!isSupabaseConfigured) return <ConfigRequired title="Ranking pendiente de Supabase" />;
 
   const admin = isAdmin(profile, user?.email);
+  const playerComments = useMemo(() => buildPlayerComments(rankings), [rankings]);
 
   return (
     <div className="space-y-8 pb-20">
@@ -106,7 +107,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
             </tr>
           </thead>
           <tbody>
-            {rankings.map((row, index) => <RankingRow key={`${row.user_id}-${row.community_id}`} row={row} index={index} rows={rankings} />)}
+            {rankings.map((row, index) => <RankingRow key={`${row.user_id}-${row.community_id}`} row={row} index={index} comment={playerComments[getRankingKey(row)]} />)}
           </tbody>
         </table>
       </div>
@@ -133,7 +134,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
               <Score label="Clasif." value={row.points_qualified} />
               <Score label="Goles" value={row.points_scorer} />
             </div>
-            <p className="mt-4 text-xs text-brand-zinc-400 italic">{playerComment(row, index, rankings)}</p>
+            <p className="mt-4 text-xs text-brand-zinc-400 italic">{playerComments[getRankingKey(row)]}</p>
           </div>
         ))}
       </div>
@@ -147,7 +148,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
   );
 }
 
-function RankingRow({ row, index, rows }: { row: RankingEntry; index: number; rows: RankingEntry[] }) {
+function RankingRow({ row, index, comment }: { row: RankingEntry; index: number; comment: string }) {
   const rankChange = getTrend(row);
   const player = row.profiles;
   return (
@@ -165,7 +166,7 @@ function RankingRow({ row, index, rows }: { row: RankingEntry; index: number; ro
           <div className="w-10 h-10 rounded-full bg-brand-gold/10 border border-brand-gold/20 flex items-center justify-center text-brand-gold font-black text-xs shrink-0 uppercase">{player?.username?.[0] || 'U'}</div>
           <div className="min-w-0">
             <span className="text-sm font-black uppercase tracking-tight text-white whitespace-nowrap">{player?.username || 'Usuario'}</span>
-            <p className="mt-1 max-w-xs text-[11px] leading-snug text-brand-zinc-500 italic normal-case">{playerComment(row, index, rows)}</p>
+            <p className="mt-1 max-w-xs text-[11px] leading-snug text-brand-zinc-500 italic normal-case">{comment}</p>
           </div>
         </div>
       </td>
@@ -256,13 +257,116 @@ const PLAYER_COMMENT_BANK = {
   ],
 } as const;
 
-function playerComment(row: RankingEntry, index: number, rows: RankingEntry[]) {
+const COMMENT_DETAILS = {
+  leader: [
+    'Ventaja de {gap} puntos; no es fuga, pero ya permite mirar por encima del hombro.',
+    'Suma {points} puntos y de momento el retrovisor le queda bastante bonito.',
+    'Tiene {points} puntos; suficiente para mandar y para ponerse un pelín insoportable.',
+    'La distancia con el segundo es de {gap}; pequeña, grande o psicológicamente enorme según quién pregunte.',
+    'Va delante por {gap}; el resto puede llamarlo suerte, pero la tabla no escucha excusas.',
+  ],
+  podium: [
+    'Está a {behindLeader} del liderato, que es cerca o lejos según la autoestima del día.',
+    'Con {points} puntos ya puede abrir la boca, aunque todavía no demasiado.',
+    'Tiene el premio en la mirilla; el pulso, de momento, no consta en acta.',
+    'Le separan {behindLeader} puntos de la cima. Distancia remontable, ego delicado.',
+    'Zona noble: aquí se respira mejor y se miente peor.',
+  ],
+  up: [
+    'Sube {movement} puesto(s); el ranking le acaba de guiñar un ojo.',
+    'Ha ganado {movement} posición(es). El grupo finge calma con una actuación mejorable.',
+    'Movimiento hacia arriba: {movement} escalón(es) y una excusa menos para llorar.',
+    'Se acerca a la zona seria; alguien debería apagarle el micro antes de que se venga arriba.',
+    'Hoy el algoritmo le quiere. Mañana ya veremos, que esto es cruel.',
+  ],
+  down: [
+    'Pierde {movement} puesto(s); el ranking no perdona ni los lunes.',
+    'Baja {movement} escalón(es). Nada grave, salvo para el orgullo en pantalla grande.',
+    'Toca gestionar daños: {movement} posición(es) menos y cara de proyecto a largo plazo.',
+    'La jornada le ha cobrado peaje. Barato no ha salido.',
+    'El descenso es controlado, dice el gabinete de crisis.',
+  ],
+  zero: [
+    'Cero puntos: propuesta conceptual, ejecución discutible.',
+    'Sigue sin sumar. La remontada será bonita si algún día decide empezar.',
+    'Marcador limpio, casi de museo. Lo competitivo ya si eso luego.',
+    'Está en modo sigilo: no le ven venir, ni los puntos tampoco.',
+    'De momento aporta misterio, que también llena.',
+  ],
+  chase: [
+    'Está a {behindLeader} del líder; no es drama, pero tampoco postal de vacaciones.',
+    'Con {points} puntos mantiene opciones y una cantidad razonable de dignidad.',
+    'Sigue dentro del barro bueno: cerca para creer, lejos para no presumir.',
+    'No lidera, pero molesta. Y eso en esta competición ya es media profesión.',
+    'Necesita una jornada limpia; o una jornada caótica donde los demás hagan el favor.',
+  ],
+  bottom: [
+    'Está a {behindLeader} del líder; la remontada exige fe y alguna calculadora amiga.',
+    'Abajo se vive con perspectiva. Demasiada perspectiva, quizá.',
+    'Con {points} puntos todavía hay partido, pero conviene acertar algo antes del documental.',
+    'La tabla le queda empinada. Bonita para escalar, fea para enseñarla.',
+    'Necesita fuego artificial, tambor y dos aciertos con cara de milagro.',
+  ],
+} as const;
+
+const COMMENT_PUNCHLINES = [
+  'La próxima jornada dicta sentencia o inventa otra excusa.',
+  'Que nadie se relaje: aquí un gol random cambia biografías.',
+  'El grupo de WhatsApp ya está preparando jurisprudencia.',
+  'Aplauso corto, vigilancia larga.',
+  'Todavía queda Mundial y todavía queda teatro.',
+  'La tabla habla bajito, pero hace daño.',
+  'Captura permitida; soberbia bajo responsabilidad propia.',
+  'Pronóstico reservado: pinta a lío.',
+] as const;
+
+function buildPlayerComments(rows: RankingEntry[]) {
+  const usedComments = new Set<string>();
+  return rows.reduce<Record<string, string>>((comments, row, index) => {
+    const key = getRankingKey(row);
+    comments[key] = createUniquePlayerComment(row, index, rows, usedComments);
+    return comments;
+  }, {});
+}
+
+function createUniquePlayerComment(row: RankingEntry, index: number, rows: RankingEntry[], usedComments: Set<string>) {
   const trend = getTrend(row);
-  const name = shortName(row.profiles?.username || row.profiles?.email || 'Este jugador');
   const bucket = getCommentBucket(row, index, rows.length, trend);
-  const options = PLAYER_COMMENT_BANK[bucket];
+  const baseOptions = PLAYER_COMMENT_BANK[bucket];
+  const detailOptions = COMMENT_DETAILS[bucket];
   const seed = getCommentSeed(row, index, rows.length);
-  return `#${index + 1}. ${options[seed % options.length].replace('{name}', name)}`;
+
+  for (let attempt = 0; attempt < baseOptions.length * detailOptions.length * COMMENT_PUNCHLINES.length; attempt += 1) {
+    const base = baseOptions[(seed + attempt) % baseOptions.length];
+    const detail = detailOptions[(Math.floor(seed / 3) + attempt) % detailOptions.length];
+    const punchline = COMMENT_PUNCHLINES[(Math.floor(seed / 7) + attempt) % COMMENT_PUNCHLINES.length];
+    const candidate = fillComment(`#${index + 1}. ${base} ${detail} ${punchline}`, row, index, rows);
+    if (!usedComments.has(candidate)) {
+      usedComments.add(candidate);
+      return candidate;
+    }
+  }
+
+  const fallback = fillComment(`#${index + 1}. {name} trae una lectura inclasificable: {points} puntos, cero aburrimiento y margen para liarla.`, row, index, rows);
+  usedComments.add(fallback);
+  return fallback;
+}
+
+function fillComment(template: string, row: RankingEntry, index: number, rows: RankingEntry[]) {
+  const points = row.total_points || 0;
+  const leaderPoints = rows[0]?.total_points || 0;
+  const nextPoints = rows[index + 1]?.total_points || 0;
+  const previousRank = row.previous_rank || index + 1;
+  const currentRank = row.current_rank || index + 1;
+  const movement = Math.max(1, Math.abs(previousRank - currentRank));
+  const gap = Math.max(0, points - nextPoints);
+  const behindLeader = Math.max(0, leaderPoints - points);
+  return template
+    .replaceAll('{name}', shortName(row.profiles?.username || row.profiles?.email || 'Este jugador'))
+    .replaceAll('{points}', String(points))
+    .replaceAll('{gap}', String(gap))
+    .replaceAll('{behindLeader}', String(behindLeader))
+    .replaceAll('{movement}', String(movement));
 }
 
 function getCommentBucket(row: RankingEntry, index: number, totalRows: number, trend: ReturnType<typeof getTrend>): keyof typeof PLAYER_COMMENT_BANK {
@@ -295,6 +399,10 @@ function getCommentSeed(row: RankingEntry, index: number, totalRows: number) {
 function shortName(value: string) {
   const clean = value.split('@')[0].replace(/[._-]+/g, ' ').trim();
   return clean.split(/\s+/).filter(Boolean).slice(0, 2).join(' ') || 'Este jugador';
+}
+
+function getRankingKey(row: RankingEntry) {
+  return `${row.user_id}-${row.community_id}`;
 }
 
 function Score({ label, value }: { label: string; value: number }) {
