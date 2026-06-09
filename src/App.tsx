@@ -288,13 +288,13 @@ export default function App() {
         </p>
       </div>
 
-      <nav className="fixed bottom-0 w-full bg-brand-gray/95 border-t border-brand-gold/10 z-40 backdrop-blur-lg pb-[env(safe-area-inset-bottom)]">
-        <div className="mobile-tabbar max-w-5xl mx-auto flex sm:grid sm:grid-flow-col sm:auto-cols-fr items-stretch h-16 sm:h-20 overflow-x-auto overflow-y-hidden px-1 sm:px-0 [scrollbar-width:none]">
+      <nav className="fixed bottom-0 left-0 right-0 w-full bg-brand-gray/95 border-t border-brand-gold/10 z-40 backdrop-blur-lg pb-[env(safe-area-inset-bottom)]">
+        <div className="mobile-tabbar grid w-full grid-cols-4 items-stretch h-16 sm:h-20">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex min-w-[66px] sm:min-w-0 flex-col items-center gap-1 sm:gap-1.5 transition-all h-full justify-center relative px-1 ${
+              className={`flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-center transition-all relative ${
                 activeTab === tab.id ? 'text-brand-gold' : 'text-brand-zinc-500 hover:text-white'
               }`}
             >
