@@ -148,7 +148,7 @@ export default function App() {
       { id: 'live', label: 'Goleadores', icon: Medal },
       { id: 'bracket', label: 'Cuadro', icon: Swords },
       { id: 'standings', label: 'Grupos', icon: Table },
-      { id: 'others', label: 'Otros', icon: Users },
+      { id: 'others', label: 'Rivales', icon: Users },
     ];
     return admin ? [...base, { id: 'admin', label: 'Admin', icon: Shield }] : base;
   }, [admin]);
@@ -273,7 +273,7 @@ export default function App() {
             {activeTab === 'standings' && <Standings />}
             {activeTab === 'bracket' && <Bracket />}
             {activeTab === 'live' && <Live />}
-            {activeTab === 'others' && <Others user={user} profile={profile} />}
+            {activeTab === 'others' && <Others user={user} profile={profile} communityId={selectedCommunityId} />}
             {activeTab === 'admin' && <Admin user={user} profile={profile} communityId={selectedCommunityId} />}
           </motion.div>
         </AnimatePresence>
