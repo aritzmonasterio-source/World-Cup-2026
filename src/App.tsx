@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
-import { Calendar, Medal, LayoutDashboard, Shield, Swords, Table, Trophy, User, Users } from 'lucide-react';
+import { Calendar, LayoutDashboard, Medal, Shield, Trophy, User, Users } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import Admin from './components/Admin';
 import AuthModal from './components/AuthModal';
-import Bracket from './components/Bracket';
 import Dashboard from './components/Dashboard';
-import Live from './components/Live';
 import Others from './components/Others';
 import Predictions from './components/Predictions';
 import Ranking from './components/Ranking';
-import Standings from './components/Standings';
+import Scores from './components/Scores';
 import { canPlay, isAdmin, isSupabaseConfigured, profileStatusLabel, supabase } from './lib/supabase';
 import { COMMUNITIES, DEFAULT_COMMUNITY_ID, NEUTRAL_THEME, WORLD_CUP_LOGO_URL, getCommunity, getCommunityThemeStyle, type CommunityId } from './lib/communities';
 import type { CommunityMembership, Profile } from './lib/types';
@@ -141,17 +139,13 @@ export default function App() {
   const approved = canPlay(profile, user?.email);
 
   const tabs = useMemo(() => {
-    const base = [
-      { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard },
+    return [
       { id: 'predictions', label: 'Previsión', icon: Calendar },
       { id: 'ranking', label: 'Ranking', icon: Trophy },
       { id: 'others', label: 'Rivales', icon: Users },
-      { id: 'live', label: 'Goles', icon: Medal },
-      { id: 'bracket', label: 'Cuadro', icon: Swords },
-      { id: 'standings', label: 'Grupos', icon: Table },
+      { id: 'scores', label: 'Marcadores', icon: Medal },
     ];
-    return admin ? [...base, { id: 'admin', label: 'Admin', icon: Shield }] : base;
-  }, [admin]);
+  }, []);
 
   if (loading) {
     return (
@@ -170,7 +164,7 @@ export default function App() {
     <div className="min-h-screen min-h-dvh overflow-x-hidden pb-28 sm:pb-24 bg-brand-gray" style={getCommunityThemeStyle(activeTheme)}>
       <header className="fixed top-0 w-full bg-brand-gray/95 backdrop-blur-xl border-b border-brand-gold/10 z-40 pt-[env(safe-area-inset-top)]">
         <div className="max-w-6xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
-          <button onClick={() => setActiveTab('dashboard')} className="flex items-center gap-4 text-left">
+          <button onClick={() => setActiveTab('dashboard')} aria-label="Ir a Inicio" className="flex items-center gap-4 text-left">
             <div className={`h-10 w-10 sm:h-14 sm:w-14 rounded-xl border border-brand-gold/20 flex items-center justify-center overflow-hidden shadow-[0_0_30px_rgba(174,156,80,0.2)] ${showingNeutralWorldLogo ? 'bg-white/90 p-1.5' : 'bg-black/20'}`}>
               {activeTheme.logoUrl ? (
                 <img src={activeTheme.logoUrl} alt={activeTheme.name} className="h-full w-auto object-contain" />
@@ -259,6 +253,17 @@ export default function App() {
           </div>
         )}
 
+        {activeTab !== 'dashboard' && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('dashboard')}
+            className="mb-5 inline-flex items-center gap-2 rounded-full border border-brand-gold/20 bg-brand-gold/10 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-brand-gold hover:border-brand-gold/50 transition-all"
+          >
+            <LayoutDashboard className="h-3.5 w-3.5" />
+            Inicio
+          </button>
+        )}
+
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -270,9 +275,7 @@ export default function App() {
             {activeTab === 'dashboard' && <Dashboard user={user} profile={profile} community={user ? selectedCommunity : NEUTRAL_THEME} communityId={selectedCommunityId} setActiveTab={setActiveTab} setShowAuth={setShowAuth} />}
             {activeTab === 'predictions' && <Predictions user={user} profile={profile} communityId={selectedCommunityId} setShowAuth={setShowAuth} />}
             {activeTab === 'ranking' && <Ranking user={user} profile={profile} communityId={selectedCommunityId} />}
-            {activeTab === 'standings' && <Standings />}
-            {activeTab === 'bracket' && <Bracket />}
-            {activeTab === 'live' && <Live />}
+            {activeTab === 'scores' && <Scores />}
             {activeTab === 'others' && <Others user={user} profile={profile} communityId={selectedCommunityId} />}
             {activeTab === 'admin' && <Admin user={user} profile={profile} communityId={selectedCommunityId} />}
           </motion.div>
