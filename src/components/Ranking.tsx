@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
-import { Activity, ArrowDown, ArrowUp, Loader2, Minus, RefreshCw, Trophy } from 'lucide-react';
+import { Activity, AlertCircle, ArrowDown, ArrowUp, CheckCircle2, Loader2, Minus, RefreshCw, Trophy } from 'lucide-react';
 import { isAdmin, supabase } from '../lib/supabase';
 import { isSupabaseConfigured } from '../lib/supabase';
 import type { CommunityMembership, Profile } from '../lib/types';
@@ -13,6 +13,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
   const [rankings, setRankings] = useState<RankingEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [recalculating, setRecalculating] = useState(false);
+  const [notice, setNotice] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -36,8 +37,17 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
 
   async function recalculate() {
     setRecalculating(true);
+    setNotice(null);
     const { error } = await supabase.rpc('recalculate_points');
-    if (error) alert(error.message);
+    const { count: finishedMatches } = await supabase
+      .from('matches')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'finished');
+    setNotice(error
+      ? { type: 'error', text: `No se pudo recalcular: ${error.message}` }
+      : finishedMatches
+        ? { type: 'ok', text: `Ranking recalculado con ${finishedMatches} partido(s) finalizado(s).` }
+        : { type: 'ok', text: 'Ranking recalculado. Todavía no hay partidos finalizados; es normal antes del primer partido del 11 de junio de 2026.' });
     await fetchRankings();
     setRecalculating(false);
   }
@@ -68,6 +78,19 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
         <p className="text-[10px] font-black uppercase tracking-[0.24em] text-brand-gold mb-2">Comentario de clasificación</p>
         <p className="text-sm text-brand-zinc-300 leading-relaxed">{rankingComment(rankings)}</p>
       </div>
+
+      {notice && (
+        <div className={`rounded-2xl border p-4 text-sm flex items-start gap-3 ${
+          notice.type === 'ok'
+            ? 'border-emerald-400/25 bg-emerald-500/10 text-emerald-100'
+            : 'border-red-400/25 bg-red-500/10 text-red-100'
+        }`}>
+          {notice.type === 'ok'
+            ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />
+            : <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />}
+          <p>{notice.text}</p>
+        </div>
+      )}
 
       <div className="hidden lg:block overflow-x-auto dimension-card p-0 border-white/5">
         <table className="w-full border-collapse">

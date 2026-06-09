@@ -104,7 +104,7 @@ export const SCORER_CANDIDATES: ScorerCandidate[] = [
     team: 'Brasil',
     code: 'BRA',
     position: 'Delantero',
-    photoUrl: 'https://upload.wikimedia.org/wikipedia/commons/c/c6/RaphinhaBenfica_%28cropped%29.png',
+    photoUrl: 'https://upload.wikimedia.org/wikipedia/commons/a/ab/Raphinha_WC2022.jpg',
     story: 'Extremo de producción alta y balón parado con Brasil.',
     projection: 'Muy útil si Brasil carga juego por bandas y suma faltas/penaltis.',
   },

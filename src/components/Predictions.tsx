@@ -628,11 +628,11 @@ export default function Predictions({
                 }}
                 className={`group overflow-hidden rounded-xl border text-left transition-all disabled:opacity-40 ${selected ? 'border-brand-gold bg-brand-gold/10 shadow-lg shadow-brand-gold/10' : 'border-white/10 bg-white/[0.03] hover:border-brand-gold/40'}`}
               >
-                <div className="aspect-[4/3] bg-black/40">
+                <div className="aspect-[4/3] bg-black/50 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.10),transparent_58%)] p-2">
                   <img
                     src={candidate.photoUrl}
                     alt={candidate.name}
-                    className="h-full w-full object-cover grayscale group-hover:grayscale-0 transition-all"
+                    className="h-full w-full rounded-lg object-contain object-top grayscale transition-all group-hover:grayscale-0"
                     onError={(event) => { event.currentTarget.style.display = 'none'; }}
                   />
                 </div>

@@ -7,6 +7,11 @@ import { displayTeam } from '../lib/flags';
 import { getCommunity, type CommunityId } from '../lib/communities';
 
 type AdminMember = CommunityMembership & { profiles?: Profile };
+type AdminNotice = { type: 'ok' | 'warning' | 'error'; text: string };
+type ResultSummary = {
+  finishedMatches: number;
+  totalGoals: number;
+};
 
 export default function Admin({ user, profile, communityId }: { user: User | null; profile: Profile | null; communityId: CommunityId }) {
   const [members, setMembers] = useState<AdminMember[]>([]);
@@ -22,7 +27,7 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
   const [settings, setSettings] = useState<CommunitySettings | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [loadError, setLoadError] = useState('');
-  const [adminNotice, setAdminNotice] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
+  const [adminNotice, setAdminNotice] = useState<AdminNotice | null>(null);
 
   const admin = isAdmin(profile, user?.email);
   const community = getCommunity(communityId);
@@ -88,10 +93,11 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
   async function syncFifa() {
     setAdminNotice(null);
     setBusy('sync');
-    const { error } = await supabase.functions.invoke('sync-fifa-matches');
+    const { data, error } = await supabase.functions.invoke<{ ok: boolean; matches?: number }>('sync-fifa-matches');
+    const summary = await loadResultSummary();
     setAdminNotice(error
       ? { type: 'error', text: `No se pudo sincronizar FIFA: ${error.message}` }
-      : { type: 'ok', text: 'Calendario y resultados sincronizados. Puntuación recalculada.' });
+      : buildRecalculateNotice('Calendario y resultados sincronizados', summary, data?.matches));
     await refresh();
     setBusy(null);
   }
@@ -100,18 +106,53 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
     setAdminNotice(null);
     setBusy('recalculate');
     let syncError = '';
+    let syncedMatches: number | undefined;
     if (syncFirst) {
-      const { error } = await supabase.functions.invoke('sync-fifa-matches');
+      const { data, error } = await supabase.functions.invoke<{ ok: boolean; matches?: number }>('sync-fifa-matches');
       syncError = error?.message || '';
+      syncedMatches = data?.matches;
     }
     const { error } = await supabase.rpc('recalculate_points');
+    const summary = await loadResultSummary();
     setAdminNotice(error
       ? { type: 'error', text: `Error al calcular puntos: ${error.message}` }
       : syncError
-        ? { type: 'error', text: `Puntos recalculados con datos actuales, pero FIFA no respondió: ${syncError}` }
-        : { type: 'ok', text: 'Puntos recalculados correctamente con los datos disponibles.' });
+        ? { type: 'warning', text: `Puntos recalculados con los datos ya guardados, pero FIFA no respondió ahora mismo: ${syncError}` }
+        : buildRecalculateNotice('Puntos recalculados correctamente', summary, syncedMatches));
     await refresh();
     setBusy(null);
+  }
+
+  async function loadResultSummary(): Promise<ResultSummary> {
+    const [{ count: finishedMatches }, { data: goalRows }] = await Promise.all([
+      supabase.from('matches').select('id', { count: 'exact', head: true }).eq('status', 'finished'),
+      supabase.from('player_goals').select('goals').gt('goals', 0),
+    ]);
+
+    return {
+      finishedMatches: finishedMatches || 0,
+      totalGoals: (goalRows || []).reduce((sum, row) => sum + (Number(row.goals) || 0), 0),
+    };
+  }
+
+  function buildRecalculateNotice(prefix: string, summary: ResultSummary, syncedMatches?: number): AdminNotice {
+    const syncText = syncedMatches ? ` FIFA ha devuelto ${syncedMatches} partidos.` : '';
+    if (summary.finishedMatches === 0) {
+      return {
+        type: 'ok',
+        text: `${prefix}.${syncText} Todavía no hay partidos finalizados ni goleadores oficiales; es normal antes del primer partido del 11 de junio de 2026. Los pronósticos están guardados y el ranking se actualizará cuando entren resultados reales.`,
+      };
+    }
+    if (summary.totalGoals === 0) {
+      return {
+        type: 'ok',
+        text: `${prefix}.${syncText} Hay ${summary.finishedMatches} partido(s) finalizado(s), pero aún no hay goleadores oficiales registrados. El ranking de goleador se moverá en cuanto FIFA publique eventos de gol o los valides manualmente.`,
+      };
+    }
+    return {
+      type: 'ok',
+      text: `${prefix}.${syncText} Datos actuales: ${summary.finishedMatches} partido(s) finalizado(s) y ${summary.totalGoals} gol(es) oficiales registrados.`,
+    };
   }
 
   async function saveManualResult() {
@@ -192,9 +233,13 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
         <div className={`rounded-2xl border p-4 text-sm flex items-start gap-3 ${
           adminNotice.type === 'ok'
             ? 'border-emerald-400/25 bg-emerald-500/10 text-emerald-100'
-            : 'border-red-400/25 bg-red-500/10 text-red-100'
+            : adminNotice.type === 'warning'
+              ? 'border-amber-300/30 bg-amber-400/10 text-amber-100'
+              : 'border-red-400/25 bg-red-500/10 text-red-100'
         }`}>
-          {adminNotice.type === 'ok' ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" /> : <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />}
+          {adminNotice.type === 'ok'
+            ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />
+            : <AlertCircle className={`mt-0.5 h-5 w-5 shrink-0 ${adminNotice.type === 'warning' ? 'text-amber-200' : 'text-red-300'}`} />}
           <p>{adminNotice.text}</p>
         </div>
       )}
