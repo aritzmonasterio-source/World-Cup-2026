@@ -188,136 +188,241 @@ function getTrend(row: RankingEntry) {
 
 function rankingComment(rows: RankingEntry[]) {
   if (rows.length === 0) return 'Todavía no hay nadie aprobado. Silencio táctico en la sala.';
-  const leader = rows[0];
-  const name = getPlayerName(leader, 'El líder');
-  if (leader.total_points === 0) return `${name} manda con cero puntos. Técnicamente es liderato; emocionalmente, pretemporada.`;
-  if (rows.length === 1) return `${name} va primero y último a la vez. Dominio absoluto, con un matiz estadístico importante.`;
-  const gap = leader.total_points - rows[1].total_points;
-  if (gap >= 40) return `${name} ha abierto hueco. El resto ya mira el Excel con respeto y algo de sudor.`;
-  if (gap <= 5) return `Clasificación apretada: aquí un gol tonto cambia amistades, cenas y algún grupo de WhatsApp.`;
-  return `${name} lidera con ${leader.total_points} puntos, pero esto todavía tiene más curvas que una tanda de penaltis.`;
+  const ctx = createCommentContext(rows[0], 0, rows);
+  const seed = getCommentSeed(ctx);
+  const second = rows[1];
+  const allZero = rows.every((row) => toScore(row.total_points) === 0);
+
+  if (rows.length === 1) {
+    return fillComment(pick(HEADLINE_SOLO_LINES, seed), ctx);
+  }
+
+  if (allZero) {
+    return fillComment(pick(HEADLINE_ZERO_LINES, seed), ctx);
+  }
+
+  const gap = second ? toScore(rows[0].total_points) - toScore(second.total_points) : 0;
+  if (gap <= 0) return fillComment(pick(HEADLINE_TIED_LINES, seed), ctx);
+  if (gap <= 5) return fillComment(pick(HEADLINE_TIGHT_LINES, seed), ctx);
+  if (gap >= 40) return fillComment(pick(HEADLINE_BREAKAWAY_LINES, seed), ctx);
+  return fillComment(pick(HEADLINE_OPEN_LINES, seed), ctx);
 }
 
-const PLAYER_COMMENT_BANK = {
+type CommentBucket = 'leader' | 'podium' | 'up' | 'down' | 'zero' | 'chase' | 'bottom' | 'tie' | 'last' | 'solo';
+type ScoreCategory = 'groups' | 'knockout' | 'qualified' | 'scorer' | 'none';
+type CategoryScore = { key: ScoreCategory; label: string; points: number };
+
+interface CommentContext {
+  row: RankingEntry;
+  index: number;
+  rows: RankingEntry[];
+  bucket: CommentBucket;
+  position: number;
+  totalRows: number;
+  name: string;
+  leaderName: string;
+  aboveName: string;
+  belowName: string;
+  points: number;
+  leaderPoints: number;
+  abovePoints: number;
+  belowPoints: number;
+  leaderGap: number;
+  aboveGap: number;
+  belowGap: number;
+  movement: number;
+  trendLabel: string;
+  topCategory: ScoreCategory;
+  topCategoryLabel: string;
+  topCategoryPoints: number;
+  secondCategoryLabel: string;
+  secondCategoryPoints: number;
+  tiedAbove: boolean;
+  tiedBelow: boolean;
+}
+
+const HEADLINE_SOLO_LINES = [
+  '{name} lidera y cierra la tabla a la vez. Es una dictadura estadística con poca oposición.',
+  '{name} va primero, segundo y último. Mucho dominio, poca presión y cero testigos incómodos.',
+  '{name} juega solo en el ranking. De momento gana, aunque el rival sea su propio ego.',
+] as const;
+
+const HEADLINE_ZERO_LINES = [
+  'Todos siguen a cero. La clasificación está tan virgen que hasta presume de inocente.',
+  'Empate general sin puntos. Mucha estrategia secreta y, por ahora, cero pruebas.',
+  'La tabla está congelada: nadie suma, nadie cae y todos pueden vender humo con dignidad.',
+  'Arranque en modo espera. El primero manda por orden de lista, no por golpes sobre la mesa.',
+] as const;
+
+const HEADLINE_TIED_LINES = [
+  '{name} aparece arriba, pero {belowName} le respira en la nuca. Liderato sí; trono cómodo, todavía no.',
+  'Hay empate arriba y {name} figura primero por detalle fino. Aquí presumir mucho sería tentar al destino.',
+  '{name} manda en una cabeza de carrera apretada. La tabla está para captura, pero con letra pequeña.',
+] as const;
+
+const HEADLINE_TIGHT_LINES = [
+  '{name} lidera con {points} puntos y solo {belowGap} de colchón. Está bonito, peligroso y un poco venenoso.',
+  'Clasificación apretada: {name} va delante, pero {belowName} está suficientemente cerca para arruinarle la sobremesa.',
+  '{name} tiene el mando, aunque con {belowGap} puntos de ventaja esto parece más préstamo que propiedad.',
+] as const;
+
+const HEADLINE_BREAKAWAY_LINES = [
+  '{name} ha abierto {belowGap} puntos. El resto aún compite, pero ya mira la tabla con cara de trámite administrativo.',
+  '{name} se ha escapado. No es sentencia, pero el grupo empieza a necesitar calculadora y algo de orgullo.',
+  '{name} manda con margen serio. Por detrás hay Mundial, sí, pero también bastante tarea pendiente.',
+] as const;
+
+const HEADLINE_OPEN_LINES = [
+  '{name} lidera con {points} puntos. No hay coronación, pero ya se permite mirar el ranking con música de entrada.',
+  '{name} va primero y {belowName} persigue. La cosa no arde todavía, pero ya huele a pique decente.',
+  '{name} está arriba con {points}. El resto tiene margen, excusas y una oportunidad para callarle pronto.',
+] as const;
+
+const OPENING_LINES: Record<CommentBucket, readonly string[]> = {
   leader: [
-    '{name} va primero y ya se nota ese brillo de quien empieza a insoportarse un poco.',
-    '{name} lidera. De momento, mucho pecho y cero obligación de pedir perdón.',
-    '{name} está arriba. Si esto acaba hoy, imprime la tabla y la enmarca sin vergüenza.',
-    '{name} manda con sonrisa de "yo ya lo sabía". Sospechoso, pero efectivo.',
-    '{name} tiene el volante. Falta saber si conduce o solo posa muy fuerte.',
-    '{name} va líder y el grupo ya practica el noble arte de quitarle mérito.',
+    '{name} va líder y ya camina como si la tabla fuese escritura pública.',
+    '{name} manda. No sabemos si por ciencia, instinto o suerte con traje, pero manda.',
+    '{name} está arriba y el grupo empieza a practicar eso de quitar mérito con elegancia dudosa.',
+    '{name} lleva el volante. Falta saber si conduce o solo posa con las llaves.',
+    '{name} se ha puesto primero. Buen momento para presumir poco y sonreír mucho.',
+    '{name} tiene la cima. El peligro ahora es creérselo demasiado pronto.',
+    '{name} lidera con pinta de haber ensayado la celebración delante del espejo.',
+    '{name} va delante. La tabla no opina, pero hoy le está dando la razón.',
   ],
   podium: [
-    '{name} pisa podio. No es gloria eterna, pero ya permite hablar un poco más alto.',
-    '{name} está en zona noble, que suena elegante hasta que miras los nervios.',
-    '{name} aguanta arriba. Estrategia fina o suerte bien peinada, el debate sigue abierto.',
-    '{name} está cerca del premio. Conviene no celebrarlo como si ya hubiese ganado algo.',
-    '{name} firma podio provisional. Bastante serio, aunque todavía huele a trampa emocional.',
-    '{name} está donde se reparten miradas incómodas: arriba y molestando.',
+    '{name} pisa podio y ya tiene licencia provisional para hablar un poco más alto.',
+    '{name} está en zona noble. Bien colocado, aunque todavía no para pedir una estatua.',
+    '{name} aguanta arriba con cara de tipo serio y pronóstico discutiblemente inspirado.',
+    '{name} huele premio. De momento huele, tocarlo ya es otro negocio.',
+    '{name} está en la foto buena. Falta que no salga movido en la próxima jornada.',
+    '{name} se mantiene cerca del botín. Cuidado con la sonrisa, que esto castiga rápido.',
+    '{name} está en ese punto exacto entre ilusión razonable y venirse demasiado arriba.',
+    '{name} tiene plaza VIP temporal. Temporal, que nadie imprima nada todavía.',
   ],
   up: [
-    '{name} sube puestos. El grupo empieza a fingir normalidad, que es lo contrario de la calma.',
-    '{name} viene lanzado. Hoy ha mirado la tabla dos veces y ninguna con humildad.',
-    '{name} mejora. No es remontada épica todavía, pero ya da para sacar conversación.',
-    '{name} avanza sin hacer ruido. Precisamente por eso empieza a dar bastante rabia.',
-    '{name} ha pegado subidón. Los de arriba ya revisan sus pronósticos con sudor fino.',
-    '{name} escala. De pronto, todos sus fallos anteriores eran parte del plan. Claro.',
+    '{name} sube y el grupo intenta fingir normalidad. No cuela demasiado.',
+    '{name} viene hacia arriba con el descaro justo para empezar a molestar.',
+    '{name} mejora puestos. Ya puede sacar pecho, pero sin romper la camiseta.',
+    '{name} escala en silencio. Mala noticia: los silenciosos suelen dar rabia cuando aciertan.',
+    '{name} pega subidón. Los de arriba ya revisan sus cuentas con menos chulería.',
+    '{name} avanza. De pronto todo lo anterior era parte del plan, claro.',
+    '{name} se mueve en dirección correcta. Pequeño golpe de autoridad, grande en autoestima.',
+    '{name} ha olido sangre en la tabla y viene con ganas de conversación incómoda.',
   ],
   down: [
-    '{name} baja. No pasa nada, salvo la dignidad haciendo un pequeño trámite.',
-    '{name} pierde altura. Hoy toca mirar al suelo y llamar aprendizaje a lo que ha sido dolor.',
-    '{name} tropieza en la tabla. Se recomienda silencio táctico y cero audios triunfalistas.',
-    '{name} cae un poco. Todavía compite, pero el ranking le ha dado una colleja elegante.',
-    '{name} retrocede. Mala jornada para sacar teorías y peor para sacar capturas.',
-    '{name} se deja puestos. El Excel no juzga, pero esta vez casi.',
+    '{name} baja. No es catástrofe, pero la dignidad acaba de pedir hielo.',
+    '{name} pierde altura. Momento perfecto para hablar de proyecto a largo plazo.',
+    '{name} tropieza en la tabla. Se recomienda silencio táctico y pocas capturas.',
+    '{name} cae un poco. Todavía compite, aunque el ranking le ha puesto firme.',
+    '{name} retrocede. Hoy conviene mirar los puntos con luz baja.',
+    '{name} se deja puestos. El Excel no juzga, pero casi se le nota.',
+    '{name} baja con cara de “no pasa nada”. Pasa poco, pero pasa.',
+    '{name} acusa el golpe. Nada irreversible, salvo alguna frase que le van a recordar.',
   ],
   zero: [
-    '{name} sigue a cero. Es una declaración artística, arriesgada y difícil de defender.',
-    '{name} no ha estrenado marcador. La fe está intacta; los datos, bastante menos.',
-    '{name} conserva cero puntos con una pureza estadística casi ofensiva.',
+    '{name} sigue a cero. Es una propuesta valiente, difícil de vender y muy limpia.',
+    '{name} no ha estrenado marcador. Fe intacta; datos todavía en huelga.',
+    '{name} conserva el cero con una pureza estadística casi ofensiva.',
     '{name} está calentando. O eso dice la versión amable del informe.',
     '{name} todavía no suma. Remontada posible, autoestima obligatoria.',
     '{name} va de incógnita. De momento, muy incógnita.',
+    '{name} mantiene el casillero impoluto. Competitivo no sé, minimalista desde luego.',
+    '{name} está en modo “cuando arranque, veréis”. El ranking, de momento, espera sentado.',
   ],
   chase: [
     '{name} sigue en la pelea. No asusta todavía, pero ya incomoda en la foto.',
     '{name} está a tiro. Un acierto bueno y aparece en la conversación de los mayores.',
-    '{name} mantiene pulso. Ni festival ni desastre: zona de cuchillo entre dientes.',
-    '{name} está vivo. Matemáticamente, emocionalmente y con bastante margen para presumir si acierta.',
+    '{name} mantiene pulso: ni festival, ni desastre, ni excusa perfecta.',
+    '{name} sigue vivo. Matemáticamente, emocionalmente y con margen para dar guerra.',
     '{name} suma lo justo para no rendirse y lo suficiente para molestar.',
     '{name} tiene plan. Si es bueno o puro teatro, lo dirá la próxima jornada.',
+    '{name} está en zona bisagra: un golpe bueno y cambia el tono del grupo.',
+    '{name} no lidera, pero tampoco decora. Está ahí, que ya fastidia bastante.',
   ],
   bottom: [
     '{name} mira la tabla desde abajo. Vista amplia, presión poca, remontada disponible.',
-    '{name} necesita una jornada con fuegos artificiales. O varias decisiones menos discutibles.',
-    '{name} está lejos, pero no hundido. Eso sí, el ranking no le está invitando a cenar.',
+    '{name} necesita una jornada con fuegos artificiales o varias decisiones menos discutibles.',
+    '{name} está lejos, no hundido. Eso sí, el ranking no le está invitando a cenar.',
     '{name} va con retraso. Elegante no es, pero todavía tiene arreglo.',
-    '{name} está en zona de "esto acaba de empezar", frase útil y bastante necesaria.',
+    '{name} está en zona de “esto acaba de empezar”, frase útil y bastante necesaria.',
     '{name} tiene margen de mejora. Muchísimo margen, por verlo en positivo.',
+    '{name} está abajo, que también es una forma de tener todo el campo por delante.',
+    '{name} necesita remontada. La épica está disponible; la evidencia, pendiente.',
   ],
-} as const;
+  tie: [
+    '{name} está empatado y vive en el barro bueno: nadie manda del todo, nadie respira tranquilo.',
+    '{name} comparte puntuación. Esto no es liderato, es una discusión con decimales emocionales.',
+    '{name} está pegado a sus vecinos. Cualquier acierto aquí vale doble en autoestima.',
+    '{name} forma parte del atasco. Mala zona para presumir, gran zona para picarse.',
+    '{name} no se despega. Ni por arriba ni por abajo: modo sándwich competitivo.',
+    '{name} está en empate técnico. Traducción: una jornada puede cambiarle el personaje.',
+  ],
+  last: [
+    '{name} cierra la tabla. Duro, sí; irreversible, ni de lejos.',
+    '{name} va último. La buena noticia: ya no puede caer más. La mala: hay que subir.',
+    '{name} ocupa el sótano provisional. Buen sitio para preparar una remontada con mala leche.',
+    '{name} está cerrando filas desde abajo. El guion de héroe empieza feo, como debe ser.',
+    '{name} mira a todos desde atrás. Perspectiva tiene; puntos le faltan algunos.',
+    '{name} necesita reacción. No una reunión, no una reflexión: puntos.',
+  ],
+  solo: [
+    '{name} juega solo en la tabla. Victoria garantizada, presión testimonial.',
+    '{name} es líder y colista a la vez. Poca competencia, mucho margen para hablar.',
+    '{name} domina su liga privada. El peligro es aburrirse antes de que llegue el pique.',
+  ],
+};
 
-const COMMENT_DETAILS = {
-  leader: [
-    'Ventaja de {gap} puntos; no es fuga, pero ya permite mirar por encima del hombro.',
-    'Suma {points} puntos y de momento el retrovisor le queda bastante bonito.',
-    'Tiene {points} puntos; suficiente para mandar y para ponerse un pelín insoportable.',
-    'La distancia con el segundo es de {gap}; pequeña, grande o psicológicamente enorme según quién pregunte.',
-    'Va delante por {gap}; el resto puede llamarlo suerte, pero la tabla no escucha excusas.',
+const CATEGORY_LINES: Record<ScoreCategory, readonly string[]> = {
+  groups: [
+    'Su gasolina viene de {topCategoryLabel}: {topCategoryPoints} puntos de oficio y algo menos de humo.',
+    'Está sacando petróleo en {topCategoryLabel}; ahí tiene {topCategoryPoints} puntos y bastante argumento.',
+    'El bloque fuerte es {topCategoryLabel}: {topCategoryPoints} puntos para justificar la sonrisa.',
+    'Donde más rasca es en {topCategoryLabel}. No es poesía, pero suma.',
+    '{topCategoryLabel} le está sujetando la candidatura con {topCategoryPoints} puntos.',
   ],
-  podium: [
-    'Está a {behindLeader} del liderato, que es cerca o lejos según la autoestima del día.',
-    'Con {points} puntos ya puede abrir la boca, aunque todavía no demasiado.',
-    'Tiene el premio en la mirilla; el pulso, de momento, no consta en acta.',
-    'Le separan {behindLeader} puntos de la cima. Distancia remontable, ego delicado.',
-    'Zona noble: aquí se respira mejor y se miente peor.',
+  knockout: [
+    'Las eliminatorias le están dando vida: {topCategoryPoints} puntos y un punto de peligro.',
+    'Su mejor zona es {topCategoryLabel}; cuando el cuadro aprieta, este tipo no se esconde.',
+    'Tiene {topCategoryPoints} puntos en {topCategoryLabel}. Ahí hay lectura o una flor bastante descarada.',
+    '{topCategoryLabel} le ha puesto serio: {topCategoryPoints} puntos y menos bromas.',
+    'El cuadro le está pagando bien. {topCategoryPoints} puntos que pesan.',
   ],
-  up: [
-    'Sube {movement} puesto(s); el ranking le acaba de guiñar un ojo.',
-    'Ha ganado {movement} posición(es). El grupo finge calma con una actuación mejorable.',
-    'Movimiento hacia arriba: {movement} escalón(es) y una excusa menos para llorar.',
-    'Se acerca a la zona seria; alguien debería apagarle el micro antes de que se venga arriba.',
-    'Hoy el algoritmo le quiere. Mañana ya veremos, que esto es cruel.',
+  qualified: [
+    'Los clasificados le están salvando el traje: {topCategoryPoints} puntos y bastante olfato.',
+    'Su fuerte está en {topCategoryLabel}. De momento lee grupos mejor que algunos leen WhatsApp.',
+    'Tiene {topCategoryPoints} puntos por {topCategoryLabel}; no luce tanto, pero duele igual.',
+    '{topCategoryLabel} le sostiene. Trabajo sucio, puntos limpios.',
+    'Está pillando posiciones con {topCategoryLabel}. Poco ruido, bastante daño.',
   ],
-  down: [
-    'Pierde {movement} puesto(s); el ranking no perdona ni los lunes.',
-    'Baja {movement} escalón(es). Nada grave, salvo para el orgullo en pantalla grande.',
-    'Toca gestionar daños: {movement} posición(es) menos y cara de proyecto a largo plazo.',
-    'La jornada le ha cobrado peaje. Barato no ha salido.',
-    'El descenso es controlado, dice el gabinete de crisis.',
+  scorer: [
+    'El goleador le está dando comida: {topCategoryPoints} puntos y permiso para mirar highlights.',
+    'Su apuesta de goleador pesa: {topCategoryPoints} puntos y una sonrisa bastante sospechosa.',
+    '{topCategoryLabel} es su mina ahora mismo. Cada gol suyo se nota en la mesa.',
+    'Está viviendo del gol ajeno con dignidad dudosa y {topCategoryPoints} puntos.',
+    'El olfato de goleador le está pagando cafés. {topCategoryPoints} puntos de golpe fino.',
   ],
-  zero: [
-    'Cero puntos: propuesta conceptual, ejecución discutible.',
-    'Sigue sin sumar. La remontada será bonita si algún día decide empezar.',
-    'Marcador limpio, casi de museo. Lo competitivo ya si eso luego.',
-    'Está en modo sigilo: no le ven venir, ni los puntos tampoco.',
-    'De momento aporta misterio, que también llena.',
+  none: [
+    'Aún no tiene una fuente clara de puntos. De momento todo es promesa, relato y paciencia.',
+    'No hay categoría dominante: el marcador sigue esperando una razón para moverse.',
+    'Sus puntos todavía no tienen biografía. Cuando lleguen, ya veremos si eran plan o accidente.',
+    'Sin zona fuerte por ahora. Mucha pizarra mental, poco impacto en la tabla.',
+    'Todavía busca su primera grieta en el ranking. El discurso está; faltan puntos.',
   ],
-  chase: [
-    'Está a {behindLeader} del líder; no es drama, pero tampoco postal de vacaciones.',
-    'Con {points} puntos mantiene opciones y una cantidad razonable de dignidad.',
-    'Sigue dentro del barro bueno: cerca para creer, lejos para no presumir.',
-    'No lidera, pero molesta. Y eso en esta competición ya es media profesión.',
-    'Necesita una jornada limpia; o una jornada caótica donde los demás hagan el favor.',
-  ],
-  bottom: [
-    'Está a {behindLeader} del líder; la remontada exige fe y alguna calculadora amiga.',
-    'Abajo se vive con perspectiva. Demasiada perspectiva, quizá.',
-    'Con {points} puntos todavía hay partido, pero conviene acertar algo antes del documental.',
-    'La tabla le queda empinada. Bonita para escalar, fea para enseñarla.',
-    'Necesita fuego artificial, tambor y dos aciertos con cara de milagro.',
-  ],
-} as const;
+};
 
-const COMMENT_PUNCHLINES = [
-  'La próxima jornada dicta sentencia o inventa otra excusa.',
-  'Que nadie se relaje: aquí un gol random cambia biografías.',
-  'El grupo de WhatsApp ya está preparando jurisprudencia.',
-  'Aplauso corto, vigilancia larga.',
-  'Todavía queda Mundial y todavía queda teatro.',
-  'La tabla habla bajito, pero hace daño.',
+const CLOSING_LINES = [
+  'La próxima jornada puede darle gloria o material para excusas.',
+  'Aquí un gol suelto cambia biografías y estados de WhatsApp.',
   'Captura permitida; soberbia bajo responsabilidad propia.',
-  'Pronóstico reservado: pinta a lío.',
+  'La tabla habla bajito, pero hoy ha dejado recado.',
+  'Queda Mundial y queda teatro, que es lo importante.',
+  'Si acierta el siguiente, el chat va a ponerse insoportable.',
+  'De momento, prudencia. Y si no hay prudencia, al menos que haya capturas.',
+  'Esto no sentencia nada, pero ya reparte miradas.',
+  'Buen momento para callar o para provocar; ambas opciones tienen riesgo.',
+  'El ranking no perdona, pero entretiene bastante.',
+  'Todo muy provisional, que es la forma elegante de decir “no te vengas arriba”.',
+  'La jornada siguiente trae examen y seguramente alguna frase que guardar.',
 ] as const;
 
 function buildPlayerComments(rows: RankingEntry[]) {
@@ -335,76 +440,229 @@ function buildPlayerComments(rows: RankingEntry[]) {
 }
 
 function createUniquePlayerComment(row: RankingEntry, index: number, rows: RankingEntry[], usedComments: Set<string>) {
-  const trend = getTrend(row);
-  const bucket = getCommentBucket(row, index, rows.length, trend);
-  const baseOptions = PLAYER_COMMENT_BANK[bucket];
-  const detailOptions = COMMENT_DETAILS[bucket];
-  const seed = getCommentSeed(row, index, rows.length);
+  const ctx = createCommentContext(row, index, rows);
+  const baseOptions = OPENING_LINES[ctx.bucket];
+  const categoryOptions = CATEGORY_LINES[ctx.topCategory];
+  const rivalOptions = getRivalLines(ctx);
+  const seed = getCommentSeed(ctx);
+  const maxAttempts = baseOptions.length * categoryOptions.length * rivalOptions.length * CLOSING_LINES.length;
 
-  for (let attempt = 0; attempt < baseOptions.length * detailOptions.length * COMMENT_PUNCHLINES.length; attempt += 1) {
-    const base = baseOptions[(seed + attempt) % baseOptions.length];
-    const detail = detailOptions[(Math.floor(seed / 3) + attempt) % detailOptions.length];
-    const punchline = COMMENT_PUNCHLINES[(Math.floor(seed / 7) + attempt) % COMMENT_PUNCHLINES.length];
-    const candidate = fillComment(`#${index + 1}. ${base} ${detail} ${punchline}`, row, index, rows);
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const opener = pick(baseOptions, seed, attempt);
+    const category = pick(categoryOptions, seed, attempt + 5);
+    const rival = pick(rivalOptions, seed, attempt + 11);
+    const close = pick(CLOSING_LINES, seed, attempt + 17);
+    const candidate = fillComment(`#${ctx.position}. ${opener} ${category} ${rival} ${close}`, ctx);
     if (!usedComments.has(candidate)) {
       usedComments.add(candidate);
       return candidate;
     }
   }
 
-  const fallback = fillComment(`#${index + 1}. {name} trae una lectura inclasificable: {points} puntos, cero aburrimiento y margen para liarla.`, row, index, rows);
+  const fallback = fillComment('#{position}. {name} trae una lectura inclasificable: {points} puntos, {trendLabel} y margen para liarla.', ctx);
   usedComments.add(fallback);
   return fallback;
 }
 
-function fillComment(template: string | null | undefined, row: RankingEntry, index: number, rows: RankingEntry[]) {
+function fillComment(template: string | null | undefined, ctx: CommentContext) {
   const safeTemplate = template || '#{position}. {name} sigue en la pelea con {points} puntos.';
-  const points = row.total_points || 0;
-  const leaderPoints = rows[0]?.total_points || 0;
-  const nextPoints = rows[index + 1]?.total_points || 0;
-  const previousRank = row.previous_rank || index + 1;
-  const currentRank = row.current_rank || index + 1;
-  const movement = Math.max(1, Math.abs(previousRank - currentRank));
-  const gap = Math.max(0, points - nextPoints);
-  const behindLeader = Math.max(0, leaderPoints - points);
-  return safeTemplate
-    .split('{position}').join(String(index + 1))
-    .split('{name}').join(shortName(getPlayerName(row, getPlayerEmail(row) || 'Este jugador')))
-    .split('{points}').join(String(points))
-    .split('{gap}').join(String(gap))
-    .split('{behindLeader}').join(String(behindLeader))
-    .split('{movement}').join(String(movement));
+  const replacements: Record<string, string> = {
+    position: String(ctx.position),
+    totalRows: String(ctx.totalRows),
+    name: ctx.name,
+    leaderName: ctx.leaderName,
+    aboveName: ctx.aboveName,
+    belowName: ctx.belowName,
+    points: String(ctx.points),
+    leaderPoints: String(ctx.leaderPoints),
+    abovePoints: String(ctx.abovePoints),
+    belowPoints: String(ctx.belowPoints),
+    leaderGap: String(ctx.leaderGap),
+    aboveGap: String(ctx.aboveGap),
+    belowGap: String(ctx.belowGap),
+    movement: String(ctx.movement),
+    trendLabel: ctx.trendLabel,
+    topCategoryLabel: ctx.topCategoryLabel,
+    topCategoryPoints: String(ctx.topCategoryPoints),
+    secondCategoryLabel: ctx.secondCategoryLabel,
+    secondCategoryPoints: String(ctx.secondCategoryPoints),
+  };
+
+  return Object.entries(replacements).reduce(
+    (text, [key, value]) => text.split(`{${key}}`).join(value),
+    safeTemplate,
+  );
 }
 
-function getCommentBucket(row: RankingEntry, index: number, totalRows: number, trend: ReturnType<typeof getTrend>): keyof typeof PLAYER_COMMENT_BANK {
-  if ((row.total_points || 0) === 0) return 'zero';
-  if (index === 0) return 'leader';
-  if (index <= 2) return 'podium';
-  if (trend === 'up') return 'up';
-  if (trend === 'down') return 'down';
-  if (totalRows > 5 && index >= totalRows - 2) return 'bottom';
+function createCommentContext(row: RankingEntry, index: number, rows: RankingEntry[]): CommentContext {
+  const position = index + 1;
+  const trend = getTrend(row);
+  const totalRows = rows.length;
+  const points = toScore(row.total_points);
+  const leader = rows[0] || row;
+  const above = rows[index - 1];
+  const below = rows[index + 1];
+  const leaderPoints = toScore(leader.total_points);
+  const abovePoints = above ? toScore(above.total_points) : points;
+  const belowPoints = below ? toScore(below.total_points) : points;
+  const categories = getCategoryScores(row);
+  const top = categories[0];
+  const second = categories[1] || categories[0];
+  const previousRank = row.previous_rank || position;
+  const currentRank = row.current_rank || position;
+  const movement = Math.max(1, Math.abs(previousRank - currentRank));
+  const ctxWithoutBucket: Omit<CommentContext, 'bucket'> = {
+    row,
+    index,
+    rows,
+    position,
+    totalRows,
+    name: shortName(getPlayerName(row, getPlayerEmail(row) || 'Este jugador')),
+    leaderName: shortName(getPlayerName(leader, 'el líder')),
+    aboveName: above ? shortName(getPlayerName(above)) : 'nadie',
+    belowName: below ? shortName(getPlayerName(below)) : 'nadie',
+    points,
+    leaderPoints,
+    abovePoints,
+    belowPoints,
+    leaderGap: Math.max(0, leaderPoints - points),
+    aboveGap: above ? Math.max(0, abovePoints - points) : 0,
+    belowGap: below ? Math.max(0, points - belowPoints) : 0,
+    movement,
+    trendLabel: getTrendLabel(trend, movement),
+    topCategory: top.key,
+    topCategoryLabel: top.label,
+    topCategoryPoints: top.points,
+    secondCategoryLabel: second.label,
+    secondCategoryPoints: second.points,
+    tiedAbove: Boolean(above && abovePoints === points),
+    tiedBelow: Boolean(below && belowPoints === points),
+  };
+
+  return {
+    ...ctxWithoutBucket,
+    bucket: getCommentBucket(ctxWithoutBucket),
+  };
+}
+
+function getCommentBucket(ctx: Omit<CommentContext, 'bucket'>): CommentBucket {
+  if (ctx.totalRows === 1) return 'solo';
+  if (ctx.position === ctx.totalRows && ctx.totalRows > 2) return ctx.points === 0 ? 'zero' : 'last';
+  if (ctx.points === 0) return 'zero';
+  if (ctx.tiedAbove || ctx.tiedBelow) return 'tie';
+  if (ctx.position === 1) return 'leader';
+  if (ctx.position <= 3) return 'podium';
+  if (ctx.trendLabel.includes('sube')) return 'up';
+  if (ctx.trendLabel.includes('baja')) return 'down';
+  if (ctx.totalRows > 5 && ctx.position >= ctx.totalRows - 1) return 'bottom';
   return 'chase';
 }
 
-function getCommentSeed(row: RankingEntry, index: number, totalRows: number) {
-  const updatedAt = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+function getRivalLines(ctx: CommentContext) {
+  if (ctx.bucket === 'solo') {
+    return [
+      'Su rival más cercano es el espejo, y aun así cuidado con relajarse.',
+      'Sin vecinos en la tabla, todo el pique queda pendiente de que entre más gente.',
+      'Compite contra el silencio. De momento lo va ganando por poco.',
+    ] as const;
+  }
+
+  if (ctx.position === 1) {
+    if (ctx.tiedBelow) {
+      return [
+        '{belowName} está empatado justo detrás. Liderato de etiqueta, no de sofá.',
+        '{belowName} le discute la cima con los mismos puntos. Aquí nadie debería sacar pecho sin casco.',
+        'Tiene a {belowName} pegado. Una mala jornada y el trono cambia de dueño.',
+      ] as const;
+    }
+    return [
+      'Le saca {belowGap} a {belowName}. Colchón pequeño, ego grande si no se controla.',
+      '{belowName} persigue a {belowGap}. Distancia cómoda solo para quien no conoce este juego.',
+      'Por detrás viene {belowName}; {belowGap} puntos no son muralla, son aviso.',
+      'Tiene {belowGap} puntos de margen. Suficiente para sonreír, insuficiente para pavonearse.',
+    ] as const;
+  }
+
+  if (ctx.position === ctx.totalRows) {
+    return [
+      'Tiene a {aboveName} a {aboveGap}. No es cerca, pero tampoco hay que llamar al comité de crisis.',
+      '{aboveName} marca la salida del sótano a {aboveGap} puntos. Objetivo claro, excusas no tanto.',
+      'Para empezar la remontada necesita cazar a {aboveName}. No suena imposible; cómodo tampoco.',
+      'El de arriba es {aboveName}, a {aboveGap}. Una buena jornada y cambia el relato.',
+    ] as const;
+  }
+
+  if (ctx.tiedAbove || ctx.tiedBelow) {
+    return [
+      'Está metido en empate con vecinos cerca. Zona perfecta para picarse por cualquier detalle.',
+      'Comparte puntuación y eso siempre trae discusión barata pero entretenida.',
+      '{aboveName} y {belowName} están demasiado cerca. Aquí un acierto vale puntos y silencio ajeno.',
+      'El margen es mínimo: esto parece ranking, pero ya funciona como ajuste de cuentas.',
+    ] as const;
+  }
+
+  return [
+    'Tiene a {aboveName} a {aboveGap} por arriba y a {belowName} a {belowGap} por abajo. Bocadillo competitivo.',
+    '{aboveName} está a tiro: {aboveGap} puntos. Por detrás, {belowName} tampoco se ha ido de vacaciones.',
+    'Si caza a {aboveName}, cambia de barrio. Si se duerme, {belowName} le toca la puerta.',
+    'Está entre {aboveName} y {belowName}; posición incómoda, buen sitio para hacer daño.',
+    '{aboveName} mira hacia abajo y {belowName} hacia arriba. En medio, {name} intentando no hacer el ridículo.',
+    'La presión viene doble: {aboveName} delante, {belowName} detrás. Bienvenido al tramo con sudor.',
+  ] as const;
+}
+
+function getCategoryScores(row: RankingEntry) {
+  const categories: CategoryScore[] = [
+    { key: 'groups', label: 'partidos de grupo', points: toScore(row.points_groups) },
+    { key: 'knockout', label: 'eliminatorias', points: toScore(row.points_knockout) },
+    { key: 'qualified', label: 'clasificados', points: toScore(row.points_qualified) },
+    { key: 'scorer', label: 'goleador', points: toScore(row.points_scorer) },
+  ];
+  categories.sort((a, b) => b.points - a.points);
+
+  if (categories[0]?.points > 0) return categories;
+  return [{ key: 'none', label: 'sin puntos claros', points: 0 } satisfies CategoryScore, ...categories];
+}
+
+function getTrendLabel(trend: ReturnType<typeof getTrend>, movement: number) {
+  if (trend === 'up') return `sube ${movement} puesto${movement === 1 ? '' : 's'}`;
+  if (trend === 'down') return `baja ${movement} puesto${movement === 1 ? '' : 's'}`;
+  return 'se mantiene';
+}
+
+function getCommentSeed(ctx: CommentContext) {
+  const updatedAt = ctx.row.updated_at ? new Date(ctx.row.updated_at).getTime() : 0;
   const updateBucket = Number.isFinite(updatedAt) ? Math.floor(updatedAt / (1000 * 60 * 60 * 6)) : 0;
-  const rankMovement = (row.previous_rank || index + 1) - (row.current_rank || index + 1);
+  const rankMovement = (ctx.row.previous_rank || ctx.position) - (ctx.row.current_rank || ctx.position);
   return Math.abs(
+    hashText(`${ctx.row.user_id}-${ctx.row.community_id}`) +
     updateBucket +
-    index * 11 +
-    totalRows * 5 +
-    (row.total_points || 0) * 31 +
-    (row.points_groups || 0) * 17 +
-    (row.points_knockout || 0) * 13 +
-    (row.points_scorer || 0) * 7 +
-    (row.points_qualified || 0) * 3 +
+    ctx.index * 53 +
+    ctx.totalRows * 29 +
+    ctx.points * 31 +
+    toScore(ctx.row.points_groups) * 17 +
+    toScore(ctx.row.points_knockout) * 13 +
+    toScore(ctx.row.points_scorer) * 7 +
+    toScore(ctx.row.points_qualified) * 3 +
     rankMovement * 19
   );
 }
 
 function fallbackPlayerComment(row: RankingEntry, index: number) {
-  return `#${index + 1}. ${shortName(getPlayerName(row))} sigue en competición. La tabla manda, pero el Mundial todavía tiene bastante mala idea.`;
+  const ctx = createCommentContext(row, index, [row]);
+  return fillComment('#{position}. {name} sigue en competición con {points} puntos. La tabla manda, pero el Mundial todavía tiene bastante mala idea.', ctx);
+}
+
+function pick<T>(items: readonly T[], seed: number, attempt = 0) {
+  return items[Math.abs(seed + attempt * 7919) % items.length];
+}
+
+function hashText(value: string) {
+  return value.split('').reduce((hash, char) => ((hash << 5) - hash + char.charCodeAt(0)) | 0, 0);
+}
+
+function toScore(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 function getProfile(row: RankingEntry): Profile | null {
