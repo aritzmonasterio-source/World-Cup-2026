@@ -21,9 +21,9 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { hasError: bo
       <div className="min-h-screen bg-[#07131a] text-white flex items-center justify-center px-6 text-center">
         <div className="max-w-sm rounded-2xl border border-white/10 bg-white/[0.04] p-6">
           <p className="text-[10px] font-black uppercase tracking-[0.35em] text-[#0f8f74] mb-3">Mundial 2026</p>
-          <h1 className="text-2xl font-black uppercase leading-none mb-4">Vamos a recargar</h1>
+          <h1 className="text-2xl font-black uppercase leading-none mb-4">Vamos a recuperar la app</h1>
           <p className="text-sm text-white/70 leading-relaxed mb-6">
-            La app ha recibido una actualización. Pulsa recargar para limpiar la versión antigua del navegador.
+            Algo no ha cargado bien. Pulsa recargar para volver a abrir la versión más reciente.
           </p>
           <button
             onClick={() => window.location.reload()}

@@ -362,11 +362,11 @@ function fillComment(template: string, row: RankingEntry, index: number, rows: R
   const gap = Math.max(0, points - nextPoints);
   const behindLeader = Math.max(0, leaderPoints - points);
   return template
-    .replaceAll('{name}', shortName(row.profiles?.username || row.profiles?.email || 'Este jugador'))
-    .replaceAll('{points}', String(points))
-    .replaceAll('{gap}', String(gap))
-    .replaceAll('{behindLeader}', String(behindLeader))
-    .replaceAll('{movement}', String(movement));
+    .split('{name}').join(shortName(row.profiles?.username || row.profiles?.email || 'Este jugador'))
+    .split('{points}').join(String(points))
+    .split('{gap}').join(String(gap))
+    .split('{behindLeader}').join(String(behindLeader))
+    .split('{movement}').join(String(movement));
 }
 
 function getCommentBucket(row: RankingEntry, index: number, totalRows: number, trend: ReturnType<typeof getTrend>): keyof typeof PLAYER_COMMENT_BANK {
