@@ -106,7 +106,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
             </tr>
           </thead>
           <tbody>
-            {rankings.map((row, index) => <RankingRow key={`${row.user_id}-${row.community_id}`} row={row} index={index} />)}
+            {rankings.map((row, index) => <RankingRow key={`${row.user_id}-${row.community_id}`} row={row} index={index} rows={rankings} />)}
           </tbody>
         </table>
       </div>
@@ -133,7 +133,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
               <Score label="Clasif." value={row.points_qualified} />
               <Score label="Goles" value={row.points_scorer} />
             </div>
-            <p className="mt-4 text-xs text-brand-zinc-400 italic">{playerComment(row, index)}</p>
+            <p className="mt-4 text-xs text-brand-zinc-400 italic">{playerComment(row, index, rankings)}</p>
           </div>
         ))}
       </div>
@@ -147,7 +147,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
   );
 }
 
-function RankingRow({ row, index }: { row: RankingEntry; index: number }) {
+function RankingRow({ row, index, rows }: { row: RankingEntry; index: number; rows: RankingEntry[] }) {
   const rankChange = getTrend(row);
   const player = row.profiles;
   return (
@@ -163,7 +163,10 @@ function RankingRow({ row, index }: { row: RankingEntry; index: number }) {
       <td className="p-5">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-brand-gold/10 border border-brand-gold/20 flex items-center justify-center text-brand-gold font-black text-xs shrink-0 uppercase">{player?.username?.[0] || 'U'}</div>
-          <span className="text-sm font-black uppercase tracking-tight text-white whitespace-nowrap">{player?.username || 'Usuario'}</span>
+          <div className="min-w-0">
+            <span className="text-sm font-black uppercase tracking-tight text-white whitespace-nowrap">{player?.username || 'Usuario'}</span>
+            <p className="mt-1 max-w-xs text-[11px] leading-snug text-brand-zinc-500 italic normal-case">{playerComment(row, index, rows)}</p>
+          </div>
         </div>
       </td>
       <td className="p-5 text-center bg-brand-gold/5"><span className="text-xl font-black text-brand-gold italic">{row.total_points}</span></td>
@@ -194,14 +197,104 @@ function rankingComment(rows: RankingEntry[]) {
   return `${name} lidera con ${leader.total_points} puntos, pero esto todavía tiene más curvas que una tanda de penaltis.`;
 }
 
-function playerComment(row: RankingEntry, index: number) {
-  if (index === 0) return row.total_points ? 'Ahora mismo mira al resto desde el balcón.' : 'Líder provisional por orden cósmico.';
-  if (index === 1) return 'Está a una buena jornada de sacar pecho.';
-  if (index === 2) return 'Podio, que ya suena bastante serio.';
-  if (getTrend(row) === 'up') return 'Viene subiendo. Cuidado con esa inercia.';
-  if (getTrend(row) === 'down') return 'Pequeño bache, todavía sin necesidad de rueda de prensa.';
-  if (row.total_points === 0) return 'Plan en construcción. La remontada empieza con dignidad.';
-  return 'Sigue vivo. Matemáticamente y con actitud.';
+const PLAYER_COMMENT_BANK = {
+  leader: [
+    '{name} va primero y ya se nota ese brillo de quien empieza a insoportarse un poco.',
+    '{name} lidera. De momento, mucho pecho y cero obligación de pedir perdón.',
+    '{name} está arriba. Si esto acaba hoy, imprime la tabla y la enmarca sin vergüenza.',
+    '{name} manda con sonrisa de "yo ya lo sabía". Sospechoso, pero efectivo.',
+    '{name} tiene el volante. Falta saber si conduce o solo posa muy fuerte.',
+    '{name} va líder y el grupo ya practica el noble arte de quitarle mérito.',
+  ],
+  podium: [
+    '{name} pisa podio. No es gloria eterna, pero ya permite hablar un poco más alto.',
+    '{name} está en zona noble, que suena elegante hasta que miras los nervios.',
+    '{name} aguanta arriba. Estrategia fina o suerte bien peinada, el debate sigue abierto.',
+    '{name} está cerca del premio. Conviene no celebrarlo como si ya hubiese ganado algo.',
+    '{name} firma podio provisional. Bastante serio, aunque todavía huele a trampa emocional.',
+    '{name} está donde se reparten miradas incómodas: arriba y molestando.',
+  ],
+  up: [
+    '{name} sube puestos. El grupo empieza a fingir normalidad, que es lo contrario de la calma.',
+    '{name} viene lanzado. Hoy ha mirado la tabla dos veces y ninguna con humildad.',
+    '{name} mejora. No es remontada épica todavía, pero ya da para sacar conversación.',
+    '{name} avanza sin hacer ruido. Precisamente por eso empieza a dar bastante rabia.',
+    '{name} ha pegado subidón. Los de arriba ya revisan sus pronósticos con sudor fino.',
+    '{name} escala. De pronto, todos sus fallos anteriores eran parte del plan. Claro.',
+  ],
+  down: [
+    '{name} baja. No pasa nada, salvo la dignidad haciendo un pequeño trámite.',
+    '{name} pierde altura. Hoy toca mirar al suelo y llamar aprendizaje a lo que ha sido dolor.',
+    '{name} tropieza en la tabla. Se recomienda silencio táctico y cero audios triunfalistas.',
+    '{name} cae un poco. Todavía compite, pero el ranking le ha dado una colleja elegante.',
+    '{name} retrocede. Mala jornada para sacar teorías y peor para sacar capturas.',
+    '{name} se deja puestos. El Excel no juzga, pero esta vez casi.',
+  ],
+  zero: [
+    '{name} sigue a cero. Es una declaración artística, arriesgada y difícil de defender.',
+    '{name} no ha estrenado marcador. La fe está intacta; los datos, bastante menos.',
+    '{name} conserva cero puntos con una pureza estadística casi ofensiva.',
+    '{name} está calentando. O eso dice la versión amable del informe.',
+    '{name} todavía no suma. Remontada posible, autoestima obligatoria.',
+    '{name} va de incógnita. De momento, muy incógnita.',
+  ],
+  chase: [
+    '{name} sigue en la pelea. No asusta todavía, pero ya incomoda en la foto.',
+    '{name} está a tiro. Un acierto bueno y aparece en la conversación de los mayores.',
+    '{name} mantiene pulso. Ni festival ni desastre: zona de cuchillo entre dientes.',
+    '{name} está vivo. Matemáticamente, emocionalmente y con bastante margen para presumir si acierta.',
+    '{name} suma lo justo para no rendirse y lo suficiente para molestar.',
+    '{name} tiene plan. Si es bueno o puro teatro, lo dirá la próxima jornada.',
+  ],
+  bottom: [
+    '{name} mira la tabla desde abajo. Vista amplia, presión poca, remontada disponible.',
+    '{name} necesita una jornada con fuegos artificiales. O varias decisiones menos discutibles.',
+    '{name} está lejos, pero no hundido. Eso sí, el ranking no le está invitando a cenar.',
+    '{name} va con retraso. Elegante no es, pero todavía tiene arreglo.',
+    '{name} está en zona de "esto acaba de empezar", frase útil y bastante necesaria.',
+    '{name} tiene margen de mejora. Muchísimo margen, por verlo en positivo.',
+  ],
+} as const;
+
+function playerComment(row: RankingEntry, index: number, rows: RankingEntry[]) {
+  const trend = getTrend(row);
+  const name = shortName(row.profiles?.username || row.profiles?.email || 'Este jugador');
+  const bucket = getCommentBucket(row, index, rows.length, trend);
+  const options = PLAYER_COMMENT_BANK[bucket];
+  const seed = getCommentSeed(row, index, rows.length);
+  return `#${index + 1}. ${options[seed % options.length].replace('{name}', name)}`;
+}
+
+function getCommentBucket(row: RankingEntry, index: number, totalRows: number, trend: ReturnType<typeof getTrend>): keyof typeof PLAYER_COMMENT_BANK {
+  if ((row.total_points || 0) === 0) return 'zero';
+  if (index === 0) return 'leader';
+  if (index <= 2) return 'podium';
+  if (trend === 'up') return 'up';
+  if (trend === 'down') return 'down';
+  if (totalRows > 5 && index >= totalRows - 2) return 'bottom';
+  return 'chase';
+}
+
+function getCommentSeed(row: RankingEntry, index: number, totalRows: number) {
+  const updatedAt = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+  const updateBucket = Number.isFinite(updatedAt) ? Math.floor(updatedAt / (1000 * 60 * 60 * 6)) : 0;
+  const rankMovement = (row.previous_rank || index + 1) - (row.current_rank || index + 1);
+  return Math.abs(
+    updateBucket +
+    index * 11 +
+    totalRows * 5 +
+    (row.total_points || 0) * 31 +
+    (row.points_groups || 0) * 17 +
+    (row.points_knockout || 0) * 13 +
+    (row.points_scorer || 0) * 7 +
+    (row.points_qualified || 0) * 3 +
+    rankMovement * 19
+  );
+}
+
+function shortName(value: string) {
+  const clean = value.split('@')[0].replace(/[._-]+/g, ' ').trim();
+  return clean.split(/\s+/).filter(Boolean).slice(0, 2).join(' ') || 'Este jugador';
 }
 
 function Score({ label, value }: { label: string; value: number }) {
