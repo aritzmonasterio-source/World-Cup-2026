@@ -91,6 +91,14 @@ function mergeSingleDraft<T extends { updated_at?: string | null }>(remote: T | 
   return isDraftNewer(draft || undefined, remote || undefined) ? draft || null : remote;
 }
 
+function normalizePlayerName(value?: string | null) {
+  return (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/gi, '')
+    .toLowerCase();
+}
+
 export default function Predictions({
   user,
   profile,
@@ -241,7 +249,12 @@ export default function Predictions({
 
   const missingGroupPredictionCount = Math.max(groupMatches.length - completedGroupPredictionCount, 0);
   const groupsComplete = groupMatches.length > 0 && missingGroupPredictionCount === 0;
-  const scorerComplete = Boolean(scorerPrediction?.player_name || scorerName.trim());
+  const selectedScorerCandidate = useMemo(
+    () => SCORER_CANDIDATES.find((candidate) => normalizePlayerName(candidate.name) === normalizePlayerName(scorerName || scorerPrediction?.player_name)),
+    [scorerName, scorerPrediction?.player_name],
+  );
+  const scorerComplete = Boolean(selectedScorerCandidate);
+  const scorerDeadlineClosed = new Date() > new Date(GROUP_DEADLINE_ISO);
 
   const predictedStandings = useMemo(() => {
     const table: Record<string, PredictedStandingRow[]> = {};
@@ -398,20 +411,27 @@ export default function Predictions({
     setTimeout(() => setSaveStatus('idle'), 2200);
   };
 
-  const saveScorer = async (overrideName = scorerName, overrideTeamId = scorerTeamId) => {
+  const saveScorer = async (overrideName = scorerName) => {
     if (!user) return setShowAuth(true);
     if (!canEdit || new Date() > new Date(GROUP_DEADLINE_ISO)) return;
-    const team = teams.find((item) => item.id === overrideTeamId);
-    if (!overrideName.trim()) return;
+    const candidate = SCORER_CANDIDATES.find((item) => normalizePlayerName(item.name) === normalizePlayerName(overrideName));
+    if (!candidate) {
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 2200);
+      return;
+    }
+    const team = teams.find((item) => item.code === candidate.code);
 
     setSavingId('scorer');
     const nextScorer = {
-      player_name: overrideName.trim(),
+      player_name: candidate.name,
       team_id: team?.id || null,
-      team_name: team?.name || null,
-      team_code: team?.code || null,
+      team_name: team?.name || candidate.team,
+      team_code: team?.code || candidate.code,
       updated_at: new Date().toISOString(),
     };
+    setScorerName(candidate.name);
+    setScorerTeamId(team?.id || '');
     persistDraft({ scorerPrediction: nextScorer });
     const { data, error } = await supabase.from('scorer_predictions').upsert({
       user_id: user.id,
@@ -559,80 +579,52 @@ export default function Predictions({
           <Target className="w-5 h-5 text-brand-gold" />
           <h2 className="text-lg font-black uppercase tracking-tighter italic">Tu goleador</h2>
         </div>
-        <div className="grid md:grid-cols-[1fr_240px_auto] gap-3">
-          <input
-            value={scorerName}
-            onChange={(event) => {
-              setScorerName(event.target.value);
-              const team = teams.find((item) => item.id === scorerTeamId);
-              persistDraft({
-                scorerPrediction: {
-                  player_name: event.target.value.trim(),
-                  team_id: team?.id || null,
-                  team_name: team?.name || null,
-                  team_code: team?.code || null,
-                  updated_at: new Date().toISOString(),
-                },
-              });
-              scheduleAutoSave('scorer', () => saveScorer(event.target.value, scorerTeamId));
-            }}
-            placeholder="Nombre del jugador"
-            disabled={!canEdit || new Date() > new Date(GROUP_DEADLINE_ISO)}
-            className="bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:border-brand-gold disabled:opacity-40"
-          />
-          <select
-            value={scorerTeamId}
-            onChange={(event) => {
-              setScorerTeamId(event.target.value);
-              const team = teams.find((item) => item.id === event.target.value);
-              persistDraft({
-                scorerPrediction: {
-                  player_name: scorerName.trim(),
-                  team_id: team?.id || null,
-                  team_name: team?.name || null,
-                  team_code: team?.code || null,
-                  updated_at: new Date().toISOString(),
-                },
-              });
-              scheduleAutoSave('scorer', () => saveScorer(scorerName, event.target.value));
-            }}
-            disabled={!canEdit || new Date() > new Date(GROUP_DEADLINE_ISO)}
-            className="bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:border-brand-gold disabled:opacity-40"
-          >
-            <option value="">Selección opcional</option>
-            {teams.map((team) => <option key={team.id} value={team.id}>{displayTeam(team.name, team.code)}</option>)}
-          </select>
-          <button onClick={user ? () => saveScorer() : () => setShowAuth(true)} disabled={canEdit && savingId === 'scorer'} className="dimension-button-primary px-6 flex items-center justify-center gap-2">
-            {savingId === 'scorer' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {user ? 'Guardar' : 'Entrar'}
-          </button>
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">Selección cerrada</p>
+              <h3 className="mt-1 text-base font-black uppercase tracking-tight">
+                {selectedScorerCandidate ? selectedScorerCandidate.name : 'Elige 1 de los 25 candidatos'}
+              </h3>
+              <p className="mt-1 text-sm text-brand-zinc-400">
+                Cada gol oficial de tu jugador suma {POINTS.scorerGoal} puntos cuando FIFA actualice los goleadores.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-emerald-200">
+              {savingId === 'scorer' ? <Loader2 className="w-3 h-3 animate-spin" /> : selectedScorerCandidate ? <CheckCircle2 className="w-3 h-3" /> : <AlertCircle className="w-3 h-3 text-amber-200" />}
+              {savingId === 'scorer' ? 'Guardando' : selectedScorerCandidate ? 'Guardado' : 'Pendiente'}
+            </div>
+          </div>
+          {scorerPrediction?.player_name && !selectedScorerCandidate && (
+            <div className="mt-4 rounded-xl border border-amber-400/30 bg-amber-400/10 p-3 text-xs text-amber-100">
+              Tu elección anterior era "{scorerPrediction.player_name}". Para evitar errores de puntuación, ahora debes elegir uno de los 25 candidatos oficiales.
+            </div>
+          )}
+          {scorerDeadlineClosed && (
+            <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-brand-zinc-400">
+              El plazo de goleador está cerrado. Se mantiene la elección guardada antes del cierre.
+            </div>
+          )}
         </div>
-        {scorerPrediction?.player_name && (
-          <p className="text-xs text-brand-gold mt-4 font-bold uppercase tracking-widest">
-            Goleador elegido: {scorerPrediction.player_name}
-          </p>
+        {!user && (
+          <button onClick={() => setShowAuth(true)} className="mt-4 dimension-button-primary w-full sm:w-auto px-6">
+            Entrar o registrarme para elegir
+          </button>
         )}
         <div className="mt-6 grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
           {SCORER_CANDIDATES.map((candidate) => {
             const team = teams.find((item) => item.code === candidate.code);
-            const selected = scorerName.trim().toLowerCase() === candidate.name.toLowerCase();
+            const selected = normalizePlayerName(scorerName || scorerPrediction?.player_name) === normalizePlayerName(candidate.name);
             return (
               <button
                 key={candidate.name}
                 type="button"
-                disabled={!canEdit || new Date() > new Date(GROUP_DEADLINE_ISO)}
+                disabled={!canEdit || scorerDeadlineClosed}
                 onClick={() => {
+                  if (!user) return setShowAuth(true);
                   setScorerName(candidate.name);
                   setScorerTeamId(team?.id || '');
-                  persistDraft({
-                    scorerPrediction: {
-                      player_name: candidate.name,
-                      team_id: team?.id || null,
-                      team_name: team?.name || null,
-                      team_code: team?.code || null,
-                      updated_at: new Date().toISOString(),
-                    },
-                  });
-                  scheduleAutoSave('scorer', () => saveScorer(candidate.name, team?.id || ''));
+                  void saveScorer(candidate.name);
                 }}
                 className={`group overflow-hidden rounded-xl border text-left transition-all disabled:opacity-40 ${selected ? 'border-brand-gold bg-brand-gold/10 shadow-lg shadow-brand-gold/10' : 'border-white/10 bg-white/[0.03] hover:border-brand-gold/40'}`}
               >
@@ -657,7 +649,7 @@ export default function Predictions({
             );
           })}
         </div>
-        <p className="mt-3 text-[11px] text-brand-zinc-500">Lista orientativa de candidatos destacados. Puedes escribir cualquier otro jugador si prefieres una apuesta propia.</p>
+        <p className="mt-3 text-[11px] text-brand-zinc-500">Lista oficial cerrada para este juego. No se aceptan goleadores escritos manualmente, así evitamos errores de puntuación.</p>
       </section>}
 
       {activeFilter !== 'scorers' && <section className="space-y-6">
