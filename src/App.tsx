@@ -145,10 +145,10 @@ export default function App() {
       { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard },
       { id: 'predictions', label: 'Previsión', icon: Calendar },
       { id: 'ranking', label: 'Ranking', icon: Trophy },
-      { id: 'live', label: 'Goleadores', icon: Medal },
+      { id: 'others', label: 'Rivales', icon: Users },
+      { id: 'live', label: 'Goles', icon: Medal },
       { id: 'bracket', label: 'Cuadro', icon: Swords },
       { id: 'standings', label: 'Grupos', icon: Table },
-      { id: 'others', label: 'Rivales', icon: Users },
     ];
     return admin ? [...base, { id: 'admin', label: 'Admin', icon: Shield }] : base;
   }, [admin]);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
-import { AlertCircle, CalendarCheck, CheckCircle2, ChevronRight, Download, EyeOff, Info, Lock, Medal, Share, Sparkles, Target, Trophy, UserCheck } from 'lucide-react';
+import { AlertCircle, CalendarCheck, CheckCircle2, ChevronRight, Download, EyeOff, Info, Lock, Medal, Share, Sparkles, Target, Trophy, UserCheck, Users } from 'lucide-react';
 import type { CommunitySettings, Profile } from '../lib/types';
 import { DIMENSION_LOGO_URL, POINTS, formatDateTime, GROUP_DEADLINE_ISO, KNOCKOUT_DEADLINE_ISO } from '../lib/constants';
 import { canPlay, profileStatusLabel, supabase } from '../lib/supabase';
@@ -161,6 +161,12 @@ export default function Dashboard({
             <button onClick={() => setShowTutorial(true)} className="px-8 py-4 rounded-lg bg-white/5 border border-white/10 text-xs font-black uppercase tracking-widest hover:border-brand-gold/30 transition-all">
               Ver tutorial
             </button>
+            {user && approved && (
+              <button onClick={() => setActiveTab('others')} className="px-8 py-4 rounded-lg bg-white/5 border border-brand-gold/20 text-xs font-black uppercase tracking-widest text-brand-gold hover:border-brand-gold/50 transition-all flex items-center justify-center gap-2">
+                <Users className="h-4 w-4" />
+                Ver rivales
+              </button>
+            )}
           </div>
         </div>
       </div>
