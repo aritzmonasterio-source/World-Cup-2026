@@ -7,7 +7,7 @@ import type { CommunityMembership, Profile } from '../lib/types';
 import type { CommunityId } from '../lib/communities';
 import ConfigRequired from './ConfigRequired';
 
-type RankingEntry = CommunityMembership & { profiles?: Profile };
+type RankingEntry = Omit<CommunityMembership, 'profiles'> & { profiles?: Profile | Profile[] | null };
 
 export default function Ranking({ user, profile, communityId }: { user: User | null; profile: Profile | null; communityId: CommunityId }) {
   const [rankings, setRankings] = useState<RankingEntry[]>([]);
@@ -52,11 +52,11 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
     setRecalculating(false);
   }
 
-  if (loading) return <div className="flex justify-center p-20"><Loader2 className="w-8 h-8 animate-spin text-brand-gold" /></div>;
-  if (!isSupabaseConfigured) return <ConfigRequired title="Ranking pendiente de Supabase" />;
-
   const admin = isAdmin(profile, user?.email);
   const playerComments = useMemo(() => buildPlayerComments(rankings), [rankings]);
+
+  if (loading) return <div className="flex justify-center p-20"><Loader2 className="w-8 h-8 animate-spin text-brand-gold" /></div>;
+  if (!isSupabaseConfigured) return <ConfigRequired title="Ranking pendiente de Supabase" />;
 
   return (
     <div className="space-y-8 pb-20">
@@ -120,8 +120,8 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
                 {index + 1}
               </div>
               <div>
-                <h3 className="text-sm font-black uppercase text-white">{row.profiles?.username || 'Usuario'}</h3>
-                <p className="text-[10px] font-bold text-brand-zinc-500 uppercase tracking-widest">{row.profiles?.email}</p>
+                <h3 className="text-sm font-black uppercase text-white">{getPlayerName(row)}</h3>
+                <p className="text-[10px] font-bold text-brand-zinc-500 uppercase tracking-widest">{getPlayerEmail(row)}</p>
               </div>
               <div className="ml-auto text-right">
                 <p className="text-[9px] font-black text-brand-gold uppercase tracking-widest mb-1">Total</p>
@@ -134,7 +134,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
               <Score label="Clasif." value={row.points_qualified} />
               <Score label="Goles" value={row.points_scorer} />
             </div>
-            <p className="mt-4 text-xs text-brand-zinc-400 italic">{playerComments[getRankingKey(row)]}</p>
+            <p className="mt-4 text-xs text-brand-zinc-400 italic">{playerComments[getRankingKey(row)] || fallbackPlayerComment(row, index)}</p>
           </div>
         ))}
       </div>
@@ -150,7 +150,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
 
 function RankingRow({ row, index, comment }: { row: RankingEntry; index: number; comment: string }) {
   const rankChange = getTrend(row);
-  const player = row.profiles;
+  const playerName = getPlayerName(row);
   return (
     <tr className={`${index % 2 === 0 ? 'bg-white/[0.03]' : 'bg-black/20'} border-b border-white/5 transition-colors`}>
       <td className="p-5 text-center">
@@ -163,10 +163,10 @@ function RankingRow({ row, index, comment }: { row: RankingEntry; index: number;
       </td>
       <td className="p-5">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-brand-gold/10 border border-brand-gold/20 flex items-center justify-center text-brand-gold font-black text-xs shrink-0 uppercase">{player?.username?.[0] || 'U'}</div>
+          <div className="w-10 h-10 rounded-full bg-brand-gold/10 border border-brand-gold/20 flex items-center justify-center text-brand-gold font-black text-xs shrink-0 uppercase">{getPlayerInitial(row)}</div>
           <div className="min-w-0">
-            <span className="text-sm font-black uppercase tracking-tight text-white whitespace-nowrap">{player?.username || 'Usuario'}</span>
-            <p className="mt-1 max-w-xs text-[11px] leading-snug text-brand-zinc-500 italic normal-case">{comment}</p>
+            <span className="text-sm font-black uppercase tracking-tight text-white whitespace-nowrap">{playerName}</span>
+            <p className="mt-1 max-w-xs text-[11px] leading-snug text-brand-zinc-500 italic normal-case">{comment || fallbackPlayerComment(row, index)}</p>
           </div>
         </div>
       </td>
@@ -189,7 +189,7 @@ function getTrend(row: RankingEntry) {
 function rankingComment(rows: RankingEntry[]) {
   if (rows.length === 0) return 'Todavía no hay nadie aprobado. Silencio táctico en la sala.';
   const leader = rows[0];
-  const name = leader.profiles?.username || 'El líder';
+  const name = getPlayerName(leader, 'El líder');
   if (leader.total_points === 0) return `${name} manda con cero puntos. Técnicamente es liderato; emocionalmente, pretemporada.`;
   if (rows.length === 1) return `${name} va primero y último a la vez. Dominio absoluto, con un matiz estadístico importante.`;
   const gap = leader.total_points - rows[1].total_points;
@@ -324,7 +324,12 @@ function buildPlayerComments(rows: RankingEntry[]) {
   const usedComments = new Set<string>();
   return rows.reduce<Record<string, string>>((comments, row, index) => {
     const key = getRankingKey(row);
-    comments[key] = createUniquePlayerComment(row, index, rows, usedComments);
+    try {
+      comments[key] = createUniquePlayerComment(row, index, rows, usedComments);
+    } catch (error) {
+      console.warn('No se pudo generar el comentario del ranking', error);
+      comments[key] = fallbackPlayerComment(row, index);
+    }
     return comments;
   }, {});
 }
@@ -352,7 +357,8 @@ function createUniquePlayerComment(row: RankingEntry, index: number, rows: Ranki
   return fallback;
 }
 
-function fillComment(template: string, row: RankingEntry, index: number, rows: RankingEntry[]) {
+function fillComment(template: string | null | undefined, row: RankingEntry, index: number, rows: RankingEntry[]) {
+  const safeTemplate = template || '#{position}. {name} sigue en la pelea con {points} puntos.';
   const points = row.total_points || 0;
   const leaderPoints = rows[0]?.total_points || 0;
   const nextPoints = rows[index + 1]?.total_points || 0;
@@ -361,8 +367,9 @@ function fillComment(template: string, row: RankingEntry, index: number, rows: R
   const movement = Math.max(1, Math.abs(previousRank - currentRank));
   const gap = Math.max(0, points - nextPoints);
   const behindLeader = Math.max(0, leaderPoints - points);
-  return template
-    .split('{name}').join(shortName(row.profiles?.username || row.profiles?.email || 'Este jugador'))
+  return safeTemplate
+    .split('{position}').join(String(index + 1))
+    .split('{name}').join(shortName(getPlayerName(row, getPlayerEmail(row) || 'Este jugador')))
     .split('{points}').join(String(points))
     .split('{gap}').join(String(gap))
     .split('{behindLeader}').join(String(behindLeader))
@@ -396,8 +403,36 @@ function getCommentSeed(row: RankingEntry, index: number, totalRows: number) {
   );
 }
 
-function shortName(value: string) {
-  const clean = value.split('@')[0].replace(/[._-]+/g, ' ').trim();
+function fallbackPlayerComment(row: RankingEntry, index: number) {
+  return `#${index + 1}. ${shortName(getPlayerName(row))} sigue en competición. La tabla manda, pero el Mundial todavía tiene bastante mala idea.`;
+}
+
+function getProfile(row: RankingEntry): Profile | null {
+  if (Array.isArray(row.profiles)) return row.profiles[0] || null;
+  return row.profiles || null;
+}
+
+function getPlayerName(row: RankingEntry, fallback = 'Usuario') {
+  const profile = getProfile(row);
+  const value = profile?.username || profile?.email || fallback;
+  return safeText(value, fallback);
+}
+
+function getPlayerEmail(row: RankingEntry) {
+  const profile = getProfile(row);
+  return safeText(profile?.email || '', '');
+}
+
+function getPlayerInitial(row: RankingEntry) {
+  return getPlayerName(row).trim().charAt(0).toUpperCase() || 'U';
+}
+
+function safeText(value: unknown, fallback: string) {
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+}
+
+function shortName(value: unknown) {
+  const clean = safeText(value, 'Este jugador').split('@')[0].replace(/[._-]+/g, ' ').trim();
   return clean.split(/\s+/).filter(Boolean).slice(0, 2).join(' ') || 'Este jugador';
 }
 
