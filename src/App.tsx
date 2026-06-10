@@ -20,15 +20,27 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showAuth, setShowAuth] = useState(false);
   const [authRecoveryMode, setAuthRecoveryMode] = useState(false);
+  const [memberships, setMemberships] = useState<CommunityMembership[]>([]);
   const [selectedCommunityId, setSelectedCommunityId] = useState<CommunityId>(() => {
     const stored = window.localStorage.getItem('wc26_selected_community') as CommunityId | null;
     return stored || DEFAULT_COMMUNITY_ID;
   });
+  const admin = isAdmin(profile, user?.email);
   const selectedCommunity = getCommunity(selectedCommunityId);
   const activeTheme = user ? selectedCommunity : NEUTRAL_THEME;
   const showingNeutralWorldLogo = !user;
+  const visibleCommunities = useMemo(() => {
+    if (!user || admin) return COMMUNITIES;
+    const allowedIds = new Set(memberships.map((membership) => membership.community_id));
+    const filtered = COMMUNITIES.filter((community) => allowedIds.has(community.id));
+    return filtered.length ? filtered : [selectedCommunity];
+  }, [admin, memberships, selectedCommunity, user]);
+  const communitySelectorLocked = Boolean(user && !admin && visibleCommunities.length <= 1);
 
   const changeCommunity = (communityId: CommunityId) => {
+    if (user && !admin && !memberships.some((membership) => membership.community_id === communityId)) {
+      return;
+    }
     window.localStorage.setItem('wc26_selected_community', communityId);
     setSelectedCommunityId(communityId);
   };
@@ -56,6 +68,7 @@ export default function App() {
         if (mounted) {
           setUser(currentUser);
           setProfile(null);
+          setMemberships([]);
           setLoading(false);
           window.clearTimeout(startupTimer);
         }
@@ -70,19 +83,19 @@ export default function App() {
 
       const baseProfile = data as Profile | null;
       let membership: CommunityMembership | null = null;
+      let membershipRows: CommunityMembership[] = [];
+      let effectiveCommunityId = selectedCommunityId;
 
       if (baseProfile) {
-        const { data: membershipRow } = await supabase
+        const adminUser = isAdmin(baseProfile, currentUser.email);
+        const { data: allMembershipRows } = await supabase
           .from('community_memberships')
           .select('*')
-          .eq('user_id', currentUser.id)
-          .eq('community_id', selectedCommunityId)
-          .maybeSingle();
+          .eq('user_id', currentUser.id);
 
-        membership = membershipRow as CommunityMembership | null;
+        membershipRows = (allMembershipRows || []) as CommunityMembership[];
 
-        if (!membership) {
-          const adminUser = isAdmin(baseProfile, currentUser.email);
+        if (!adminUser && membershipRows.length === 0) {
           const { data: createdMembership } = await supabase
             .from('community_memberships')
             .upsert({
@@ -95,13 +108,23 @@ export default function App() {
             .select('*')
             .maybeSingle();
 
-          membership = createdMembership as CommunityMembership | null;
+          if (createdMembership) {
+            membershipRows = [createdMembership as CommunityMembership];
+          }
         }
+
+        const canUseSelectedCommunity = adminUser || membershipRows.some((row) => row.community_id === selectedCommunityId);
+        if (!canUseSelectedCommunity && membershipRows[0]?.community_id) {
+          effectiveCommunityId = membershipRows[0].community_id as CommunityId;
+          window.localStorage.setItem('wc26_selected_community', effectiveCommunityId);
+        }
+
+        membership = membershipRows.find((row) => row.community_id === effectiveCommunityId) || null;
       }
 
       const effectiveProfile = baseProfile ? {
         ...baseProfile,
-        community_id: selectedCommunityId,
+        community_id: effectiveCommunityId,
         role: membership?.role || baseProfile.role,
         status: membership?.status || (isAdmin(baseProfile, currentUser.email) ? 'approved' : 'pending'),
         total_points: membership?.total_points || 0,
@@ -113,7 +136,11 @@ export default function App() {
 
       if (mounted) {
         setUser(currentUser);
+        setMemberships(membershipRows);
         setProfile(effectiveProfile);
+        if (effectiveCommunityId !== selectedCommunityId) {
+          setSelectedCommunityId(effectiveCommunityId);
+        }
         setLoading(false);
         window.clearTimeout(startupTimer);
       }
@@ -135,7 +162,6 @@ export default function App() {
     };
   }, [selectedCommunityId]);
 
-  const admin = isAdmin(profile, user?.email);
   const approved = canPlay(profile, user?.email);
 
   const tabs = useMemo(() => {
@@ -179,16 +205,26 @@ export default function App() {
           </button>
 
           <div className="flex min-w-0 items-center gap-2 sm:gap-4">
-            <select
-              value={selectedCommunityId}
-              onChange={(event) => changeCommunity(event.target.value as CommunityId)}
-              aria-label="Comunidad"
-              className="max-w-[112px] sm:max-w-none bg-black/30 border border-brand-gold/20 rounded-lg px-2 sm:px-3 py-2 text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-white outline-none focus:border-brand-gold"
-            >
-              {COMMUNITIES.map((community) => (
-                <option key={community.id} value={community.id}>{community.shortName}</option>
-              ))}
-            </select>
+            {communitySelectorLocked ? (
+              <div
+                aria-label="Comunidad bloqueada"
+                className="max-w-[142px] truncate rounded-lg border border-brand-gold/20 bg-black/30 px-2 py-2 text-[9px] font-black uppercase tracking-widest text-white sm:max-w-none sm:px-3 sm:text-[10px]"
+                title="Tu acceso está vinculado a esta comunidad"
+              >
+                {selectedCommunity.shortName}
+              </div>
+            ) : (
+              <select
+                value={selectedCommunityId}
+                onChange={(event) => changeCommunity(event.target.value as CommunityId)}
+                aria-label="Comunidad"
+                className="max-w-[112px] sm:max-w-none bg-black/30 border border-brand-gold/20 rounded-lg px-2 sm:px-3 py-2 text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-white outline-none focus:border-brand-gold"
+              >
+                {visibleCommunities.map((community) => (
+                  <option key={community.id} value={community.id}>{community.shortName}</option>
+                ))}
+              </select>
+            )}
 
             {user && (
               <div className="hidden lg:flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-black/20 overflow-hidden">
