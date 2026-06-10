@@ -29,16 +29,21 @@ export default function App() {
   const selectedCommunity = getCommunity(selectedCommunityId);
   const activeTheme = user ? selectedCommunity : NEUTRAL_THEME;
   const showingNeutralWorldLogo = !user;
+  const selectableMemberships = useMemo(() => {
+    if (!user || admin) return memberships;
+    const approvedMemberships = memberships.filter((membership) => membership.status === 'approved');
+    return approvedMemberships.length ? approvedMemberships : memberships.slice(0, 1);
+  }, [admin, memberships, user]);
   const visibleCommunities = useMemo(() => {
     if (!user || admin) return COMMUNITIES;
-    const allowedIds = new Set(memberships.map((membership) => membership.community_id));
+    const allowedIds = new Set(selectableMemberships.map((membership) => membership.community_id));
     const filtered = COMMUNITIES.filter((community) => allowedIds.has(community.id));
     return filtered.length ? filtered : [selectedCommunity];
-  }, [admin, memberships, selectedCommunity, user]);
+  }, [admin, selectableMemberships, selectedCommunity, user]);
   const communitySelectorLocked = Boolean(user && !admin && visibleCommunities.length <= 1);
 
   const changeCommunity = (communityId: CommunityId) => {
-    if (user && !admin && !memberships.some((membership) => membership.community_id === communityId)) {
+    if (user && !admin && !selectableMemberships.some((membership) => membership.community_id === communityId)) {
       return;
     }
     window.localStorage.setItem('wc26_selected_community', communityId);
@@ -91,7 +96,8 @@ export default function App() {
         const { data: allMembershipRows } = await supabase
           .from('community_memberships')
           .select('*')
-          .eq('user_id', currentUser.id);
+          .eq('user_id', currentUser.id)
+          .order('created_at', { ascending: true });
 
         membershipRows = (allMembershipRows || []) as CommunityMembership[];
 
@@ -113,9 +119,11 @@ export default function App() {
           }
         }
 
-        const canUseSelectedCommunity = adminUser || membershipRows.some((row) => row.community_id === selectedCommunityId);
-        if (!canUseSelectedCommunity && membershipRows[0]?.community_id) {
-          effectiveCommunityId = membershipRows[0].community_id as CommunityId;
+        const approvedRows = membershipRows.filter((row) => row.status === 'approved');
+        const selectableRows = adminUser ? membershipRows : (approvedRows.length ? approvedRows : membershipRows.slice(0, 1));
+        const canUseSelectedCommunity = adminUser || selectableRows.some((row) => row.community_id === selectedCommunityId);
+        if (!canUseSelectedCommunity && selectableRows[0]?.community_id) {
+          effectiveCommunityId = selectableRows[0].community_id as CommunityId;
           window.localStorage.setItem('wc26_selected_community', effectiveCommunityId);
         }
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { AlertCircle, CheckCircle2, ChevronLeft, Clock, Eye, FileDown, Loader2, Lock, Medal, Save, ShieldAlert, Target, Trophy, Tv } from 'lucide-react';
 import { motion } from 'motion/react';
-import { canPlay, supabase } from '../lib/supabase';
+import { canPlay, isAdmin, supabase } from '../lib/supabase';
 import type { FinalistPrediction, KnockoutPrediction, Match, MatchPrediction, Profile, ScorerPrediction, Team } from '../lib/types';
 import { formatDateTime, GROUP_DEADLINE_ISO, isMatchLocked, KNOCKOUT_DEADLINE_ISO, POINTS } from '../lib/constants';
 import { displayTeam, getFlagEmoji, getFlagUrl } from '../lib/flags';
@@ -124,7 +124,8 @@ export default function Predictions({
   const [scorerTeamId, setScorerTeamId] = useState('');
   const autoSaveTimers = useRef<Record<string, number>>({});
 
-  const approved = canPlay(profile, user?.email);
+  const admin = isAdmin(profile, user?.email);
+  const approved = Boolean(admin || (canPlay(profile, user?.email) && profile?.community_id === communityId));
   const canEdit = Boolean(user && approved);
   const community = getCommunity(communityId);
   const groups = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
@@ -163,7 +164,7 @@ export default function Predictions({
       setMatches((matchRows || []) as Match[]);
       setTeams((teamRows || []) as Team[]);
 
-      if (user) {
+      if (user && approved) {
         const draft = readPredictionDraft(user.id, communityId);
         const [{ data: predRows }, { data: knockoutRows }, { data: finalistRow }, { data: scorerRow }] = await Promise.all([
           supabase.from('match_predictions').select('*').eq('user_id', user.id).eq('community_id', communityId),
@@ -207,7 +208,7 @@ export default function Predictions({
     }
 
     fetchData();
-  }, [user, communityId]);
+  }, [approved, user, communityId]);
 
   useEffect(() => {
     return () => {

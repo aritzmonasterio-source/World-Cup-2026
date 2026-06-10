@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { Activity, AlertCircle, ArrowDown, ArrowUp, CheckCircle2, Loader2, Minus, RefreshCw, Trophy } from 'lucide-react';
-import { isAdmin, supabase } from '../lib/supabase';
+import { canPlay, isAdmin, supabase } from '../lib/supabase';
 import { isSupabaseConfigured } from '../lib/supabase';
 import type { CommunityMembership, Profile } from '../lib/types';
 import type { CommunityId } from '../lib/communities';
@@ -14,14 +14,21 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
   const [loading, setLoading] = useState(true);
   const [recalculating, setRecalculating] = useState(false);
   const [notice, setNotice] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
+  const admin = isAdmin(profile, user?.email);
+  const canViewCommunityRanking = Boolean(admin || (user && canPlay(profile, user.email) && profile?.community_id === communityId));
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
       setLoading(false);
       return;
     }
+    if (!canViewCommunityRanking) {
+      setRankings([]);
+      setLoading(false);
+      return;
+    }
     fetchRankings();
-  }, [communityId]);
+  }, [canViewCommunityRanking, communityId]);
 
   async function fetchRankings() {
     const { data } = await supabase
@@ -52,11 +59,21 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
     setRecalculating(false);
   }
 
-  const admin = isAdmin(profile, user?.email);
   const playerComments = useMemo(() => buildPlayerComments(rankings), [rankings]);
 
   if (loading) return <div className="flex justify-center p-20"><Loader2 className="w-8 h-8 animate-spin text-brand-gold" /></div>;
   if (!isSupabaseConfigured) return <ConfigRequired title="Ranking pendiente de Supabase" />;
+  if (!canViewCommunityRanking) {
+    return (
+      <div className="dimension-card-accent p-8 text-center max-w-2xl mx-auto">
+        <AlertCircle className="mx-auto mb-4 h-9 w-9 text-brand-gold" />
+        <h1 className="text-2xl font-black uppercase tracking-tighter italic">Ranking privado</h1>
+        <p className="mt-3 text-sm text-brand-zinc-400 leading-relaxed">
+          Solo los jugadores aprobados de esta comunidad pueden ver su clasificación. Cambia a tu comunidad asignada o espera aprobación del admin.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 pb-20">

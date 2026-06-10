@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { CalendarClock, ChevronDown, Lock, Target, Trophy, Users } from 'lucide-react';
 import type { CommunityMembership, FinalistPrediction, KnockoutPrediction, Match, MatchPrediction, Profile, ScorerPrediction } from '../lib/types';
-import { canPlay, supabase } from '../lib/supabase';
+import { canPlay, isAdmin, supabase } from '../lib/supabase';
 import { formatDateTime, GROUP_DEADLINE_ISO, KNOCKOUT_DEADLINE_ISO } from '../lib/constants';
 import { displayTeam } from '../lib/flags';
 import type { CommunityId } from '../lib/communities';
@@ -28,7 +28,8 @@ export default function Others({
   const [scorerPredictions, setScorerPredictions] = useState<ScorerPrediction[]>([]);
   const [finalistPredictions, setFinalistPredictions] = useState<FinalistPrediction[]>([]);
 
-  const approved = canPlay(profile, user?.email);
+  const admin = isAdmin(profile, user?.email);
+  const approved = Boolean(admin || (canPlay(profile, user?.email) && profile?.community_id === communityId));
   const groupsOpen = now >= new Date(GROUP_DEADLINE_ISO);
   const knockoutOpen = now >= new Date(KNOCKOUT_DEADLINE_ISO);
   const hasAnyOpenSection = groupsOpen || knockoutOpen;
