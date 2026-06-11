@@ -8,7 +8,7 @@
 4. Match, team, result, scorer-goal and sync data are admin/service-role writes only.
 5. Group, scorer, match and knockout predictions are owner-writes only inside the selected community.
 6. Deadlines are enforced in the application and should also be mirrored in any future database trigger:
-   - Groups, classified teams and scorer: 9 June 2026, 23:59 Europe/Madrid.
+   - Groups, classified teams and scorer: 11 June 2026, 20:30 Europe/Madrid.
    - Full knockout bracket: 28 June 2026, 10:00 Europe/Madrid.
 7. Prediction visibility is owner/admin before closure; social reveal views must only show closed markets.
 

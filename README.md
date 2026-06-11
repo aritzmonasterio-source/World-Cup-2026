@@ -60,7 +60,7 @@ Incluye tres comunidades independientes dentro del mismo entorno:
 
 ## Fechas límite
 
-- Grupos, clasificados y goleador: 9 junio 2026, 23:59 Europe/Madrid.
+- Grupos, clasificados y goleador: 11 junio 2026, 20:30 Europe/Madrid.
 - Toda la fase eliminatoria: 28 junio 2026, 10:00 Europe/Madrid.
 - Los cruces que aún no estén definidos se pronostican igualmente como previsión de cuadro.
 
