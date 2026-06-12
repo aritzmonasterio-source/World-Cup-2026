@@ -3,8 +3,9 @@ import type { User } from '@supabase/supabase-js';
 import { AlertCircle, CheckCircle2, ChevronLeft, Clock, Eye, FileDown, Loader2, Lock, Medal, Save, ShieldAlert, Target, Trophy, Tv } from 'lucide-react';
 import { motion } from 'motion/react';
 import { canPlay, isAdmin, supabase } from '../lib/supabase';
-import type { FinalistPrediction, KnockoutPrediction, Match, MatchPrediction, Profile, ScorerPrediction, Team } from '../lib/types';
-import { formatDateTime, GROUP_DEADLINE_ISO, isMatchLocked, KNOCKOUT_DEADLINE_ISO, POINTS } from '../lib/constants';
+import type { CommunitySettings, FinalistPrediction, KnockoutPrediction, Match, MatchPrediction, Profile, ScorerPrediction, Team } from '../lib/types';
+import { formatDateTime, POINTS } from '../lib/constants';
+import { getMatchDeadline, getPhaseDeadline, isDeadlineClosed } from '../lib/deadlines';
 import { displayTeam, getFlagEmoji, getFlagUrl } from '../lib/flags';
 import { WORLD_CUP_LOGO_URL, getCommunity, type CommunityId } from '../lib/communities';
 import { SCORER_CANDIDATES } from '../lib/scorerCandidates';
@@ -116,6 +117,7 @@ export default function Predictions({
   const [knockoutPredictions, setKnockoutPredictions] = useState<KnockoutPredictionMap>({});
   const [finalistPrediction, setFinalistPrediction] = useState<Partial<FinalistPrediction> | null>(null);
   const [scorerPrediction, setScorerPrediction] = useState<Partial<ScorerPrediction> | null>(null);
+  const [settings, setSettings] = useState<CommunitySettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
@@ -137,16 +139,26 @@ export default function Predictions({
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
-      let [{ data: matchRows, error: matchError }, { data: teamRows, error: teamError }] = await Promise.all([
+      let [
+        { data: matchRows, error: matchError },
+        { data: teamRows, error: teamError },
+        { data: settingsRow, error: settingsError },
+      ] = await Promise.all([
         supabase.from('matches').select('*').order('kickoff_at', { ascending: true }),
         supabase.from('teams').select('*').order('group_code', { ascending: true }).order('name', { ascending: true }),
+        supabase.from('community_settings').select('*').eq('community_id', communityId).maybeSingle(),
       ]);
 
       if ((!matchRows || matchRows.length === 0) && !matchError) {
         await supabase.functions.invoke('sync-fifa-matches');
-        [{ data: matchRows, error: matchError }, { data: teamRows, error: teamError }] = await Promise.all([
+        [
+          { data: matchRows, error: matchError },
+          { data: teamRows, error: teamError },
+          { data: settingsRow, error: settingsError },
+        ] = await Promise.all([
           supabase.from('matches').select('*').order('kickoff_at', { ascending: true }),
           supabase.from('teams').select('*').order('group_code', { ascending: true }).order('name', { ascending: true }),
+          supabase.from('community_settings').select('*').eq('community_id', communityId).maybeSingle(),
         ]);
       }
 
@@ -163,6 +175,8 @@ export default function Predictions({
 
       setMatches((matchRows || []) as Match[]);
       setTeams((teamRows || []) as Team[]);
+      if (settingsError) console.warn('No se pudieron cargar los plazos de la comunidad', settingsError);
+      setSettings((settingsRow as CommunitySettings | null) || null);
 
       if (user && approved) {
         const draft = readPredictionDraft(user.id, communityId);
@@ -255,7 +269,11 @@ export default function Predictions({
     [scorerName, scorerPrediction?.player_name],
   );
   const scorerComplete = Boolean(selectedScorerCandidate);
-  const scorerDeadlineClosed = new Date() > new Date(GROUP_DEADLINE_ISO);
+  const groupDeadlineIso = getPhaseDeadline('groups', settings, profile?.prediction_unlocks);
+  const scorerDeadlineIso = getPhaseDeadline('scorer', settings, profile?.prediction_unlocks);
+  const knockoutDeadlineIso = getPhaseDeadline('knockout', settings, profile?.prediction_unlocks);
+  const scorerDeadlineClosed = isDeadlineClosed(scorerDeadlineIso);
+  const isPredictionMatchLocked = (match: Match) => isDeadlineClosed(getMatchDeadline(match, settings, profile?.prediction_unlocks));
 
   const predictedStandings = useMemo(() => {
     const table: Record<string, PredictedStandingRow[]> = {};
@@ -297,7 +315,7 @@ export default function Predictions({
 
   const saveMatchPrediction = async (match: Match, override?: Partial<MatchPrediction>) => {
     if (!user) return setShowAuth(true);
-    if (!canEdit || isMatchLocked(match)) return;
+    if (!canEdit || isPredictionMatchLocked(match)) return;
     const pred = override || matchPredictions[match.id];
     if (pred?.home_score === undefined || pred?.away_score === undefined) return;
 
@@ -342,7 +360,7 @@ export default function Predictions({
 
   const saveKnockoutPrediction = async (match: Match, override?: Partial<KnockoutPrediction>) => {
     if (!user) return setShowAuth(true);
-    if (!canEdit || new Date() > new Date(KNOCKOUT_DEADLINE_ISO)) return;
+    if (!canEdit || isDeadlineClosed(knockoutDeadlineIso)) return;
     const pred = override || knockoutPredictions[match.id];
     if (!pred?.predicted_home_team_id || !pred?.predicted_away_team_id || pred.predicted_home_team_id === pred.predicted_away_team_id) return;
 
@@ -384,7 +402,7 @@ export default function Predictions({
 
   const saveFinalists = async (override?: Partial<FinalistPrediction>) => {
     if (!user) return setShowAuth(true);
-    if (!canEdit || new Date() > new Date(KNOCKOUT_DEADLINE_ISO)) return;
+    if (!canEdit || isDeadlineClosed(knockoutDeadlineIso)) return;
     const pick = override || finalistPrediction || {};
     setSavingId('finalists');
     const updatedAt = pick.updated_at || new Date().toISOString();
@@ -414,7 +432,7 @@ export default function Predictions({
 
   const saveScorer = async (overrideName = scorerName) => {
     if (!user) return setShowAuth(true);
-    if (!canEdit || new Date() > new Date(GROUP_DEADLINE_ISO)) return;
+    if (!canEdit || isDeadlineClosed(scorerDeadlineIso)) return;
     const candidate = SCORER_CANDIDATES.find((item) => normalizePlayerName(item.name) === normalizePlayerName(overrideName));
     if (!candidate) {
       setSaveStatus('error');
@@ -564,9 +582,9 @@ export default function Predictions({
       )}
 
       <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <PhaseButton active={activeFilter === 'groups'} onClick={() => setActiveFilter('groups')} title="1. Partidos fase 1" date={formatDateTime(GROUP_DEADLINE_ISO)} status={groupsComplete ? 'Completo' : `${completedGroupPredictionCount}/${groupMatches.length || 72}`} />
-        <PhaseButton active={activeFilter === 'scorers'} onClick={() => setActiveFilter('scorers')} title="2. Goleadores" date={formatDateTime(GROUP_DEADLINE_ISO)} status={scorerComplete ? 'Elegido' : 'Pendiente'} />
-        <PhaseButton active={activeFilter === 'knockout'} onClick={() => setActiveFilter('knockout')} title="3. Fase eliminatoria" date={formatDateTime(KNOCKOUT_DEADLINE_ISO)} status="Cuadro" />
+        <PhaseButton active={activeFilter === 'groups'} onClick={() => setActiveFilter('groups')} title="1. Partidos fase 1" date={formatDateTime(groupDeadlineIso)} status={groupsComplete ? 'Completo' : `${completedGroupPredictionCount}/${groupMatches.length || 72}`} />
+        <PhaseButton active={activeFilter === 'scorers'} onClick={() => setActiveFilter('scorers')} title="2. Goleadores" date={formatDateTime(scorerDeadlineIso)} status={scorerComplete ? 'Elegido' : 'Pendiente'} />
+        <PhaseButton active={activeFilter === 'knockout'} onClick={() => setActiveFilter('knockout')} title="3. Fase eliminatoria" date={formatDateTime(knockoutDeadlineIso)} status="Cuadro" />
       </section>
 
       {activeFilter === 'groups' && (
@@ -658,7 +676,7 @@ export default function Predictions({
           <FinalistsPanel
             teams={selectableTeams}
             pick={finalistPrediction}
-            locked={!canEdit || new Date() > new Date(KNOCKOUT_DEADLINE_ISO)}
+            locked={!canEdit || isDeadlineClosed(knockoutDeadlineIso)}
             saving={savingId === 'finalists'}
             onChange={updateFinalistPick}
             onSave={() => saveFinalists()}
@@ -667,7 +685,7 @@ export default function Predictions({
 
         {activeFilter === 'knockout' && (
           <div className="rounded-2xl border border-brand-gold/20 bg-brand-gold/5 p-5 text-sm text-brand-zinc-300">
-            <span className="font-black uppercase tracking-widest text-brand-gold">Eliminatorias:</span> los dieciseisavos se rellenan con los cruces reales confirmados. Desde octavos hasta la final haces tu previsión manual antes del {formatDateTime(KNOCKOUT_DEADLINE_ISO)}.
+            <span className="font-black uppercase tracking-widest text-brand-gold">Eliminatorias:</span> los dieciseisavos se rellenan con los cruces reales confirmados. Desde octavos hasta la final haces tu previsión manual antes del {formatDateTime(knockoutDeadlineIso)}.
           </div>
         )}
 
@@ -681,8 +699,8 @@ export default function Predictions({
                   const pred = matchPredictions[match.id];
                   const knockoutPred = knockoutPredictions[match.id];
                   const isKnockout = isKnockoutFixture(match);
-                  const locked = !canEdit || (isKnockout ? new Date() > new Date(KNOCKOUT_DEADLINE_ISO) : isMatchLocked(match));
-                  const marketClosed = isMatchLocked(match);
+                  const locked = !canEdit || (isKnockout ? isDeadlineClosed(knockoutDeadlineIso) : isPredictionMatchLocked(match));
+                  const marketClosed = isPredictionMatchLocked(match);
                   const knockoutSaved = knockoutPred?.predicted_home_team_id && knockoutPred?.predicted_away_team_id && knockoutPred.predicted_home_team_id !== knockoutPred.predicted_away_team_id;
 
                   if (isKnockout) {
@@ -792,7 +810,7 @@ export default function Predictions({
       {activeFilter === 'groups' && <section className="space-y-5 md:hidden">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <h2 className="text-lg font-black uppercase tracking-tighter italic flex items-center gap-3"><Trophy className="w-5 h-5 text-brand-gold" /> Clasificación prevista automática</h2>
-          <span className="text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">Cierra {formatDateTime(GROUP_DEADLINE_ISO)}</span>
+          <span className="text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">Cierra {formatDateTime(groupDeadlineIso)}</span>
         </div>
         <p className="text-sm text-brand-zinc-400">Se calcula automáticamente con tus marcadores. Puesto exacto: {POINTS.groupExactPosition} pts. Clasificado acertado sin puesto exacto: {POINTS.groupQualified} pts.</p>
         <div className="grid gap-4">
@@ -801,7 +819,7 @@ export default function Predictions({
       </section>}
 
       <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-xs text-brand-zinc-400">
-        La fase de grupos cierra el {formatDateTime(GROUP_DEADLINE_ISO)}. La fase eliminatoria cierra el {formatDateTime(KNOCKOUT_DEADLINE_ISO)}.
+        La fase de grupos cierra el {formatDateTime(groupDeadlineIso)}. El goleador cierra el {formatDateTime(scorerDeadlineIso)}. La fase eliminatoria cierra el {formatDateTime(knockoutDeadlineIso)}.
       </div>
     </div>
   );

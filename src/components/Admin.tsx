@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
-import { AlertCircle, CheckCircle2, Euro, Loader2, Mail, RefreshCw, Shield, UserCheck } from 'lucide-react';
+import { AlertCircle, CalendarClock, CheckCircle2, Euro, Loader2, LockOpen, Mail, RefreshCw, RotateCcw, Shield, TimerReset, UserCheck } from 'lucide-react';
 import { isAdmin, supabase } from '../lib/supabase';
-import type { CommunityMembership, CommunitySettings, Match, Profile, Team } from '../lib/types';
+import type { CommunityMembership, CommunitySettings, Match, PredictionPhase, Profile, Team } from '../lib/types';
 import { displayTeam } from '../lib/flags';
 import { getCommunity, type CommunityId } from '../lib/communities';
+import { addHoursIso, fromDateTimeLocalValue, getPhaseDeadline, toDateTimeLocalValue } from '../lib/deadlines';
 
 type AdminMember = CommunityMembership & { profiles?: Profile };
 type AdminNotice = { type: 'ok' | 'warning' | 'error'; text: string };
@@ -74,6 +75,9 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
         globalRunnerUp: 20,
         globalThird: 15,
       },
+      groups_deadline_at: null,
+      scorer_deadline_at: null,
+      knockout_deadline_at: null,
       notes: '',
     });
   }
@@ -86,6 +90,119 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
       .eq('user_id', id)
       .eq('community_id', communityId);
     if (error) alert(error.message);
+    await refresh();
+    setBusy(null);
+  }
+
+  function deadlineField(phase: PredictionPhase): keyof Pick<CommunitySettings, 'groups_deadline_at' | 'scorer_deadline_at' | 'knockout_deadline_at'> {
+    if (phase === 'groups') return 'groups_deadline_at';
+    if (phase === 'scorer') return 'scorer_deadline_at';
+    return 'knockout_deadline_at';
+  }
+
+  function unlockField(phase: PredictionPhase) {
+    if (phase === 'groups') return 'groups_until';
+    if (phase === 'scorer') return 'scorer_until';
+    return 'knockout_until';
+  }
+
+  function phaseLabel(phase: PredictionPhase) {
+    if (phase === 'groups') return 'grupos';
+    if (phase === 'scorer') return 'goleador';
+    return 'eliminatoria';
+  }
+
+  function updateDeadlineField(phase: PredictionPhase, value: string) {
+    if (!settings) return;
+    setSettings({
+      ...settings,
+      [deadlineField(phase)]: fromDateTimeLocalValue(value),
+    });
+  }
+
+  async function persistCommunitySettings(nextSettings: CommunitySettings, notice = 'Reglas guardadas correctamente') {
+    setBusy('settings');
+    const { error } = await supabase.from('community_settings').upsert({
+      community_id: communityId,
+      bizum_recipient: nextSettings.bizum_recipient || 'Aritz',
+      entry_fee_eur: Number(nextSettings.entry_fee_eur) || 0,
+      prize_distribution: nextSettings.prize_distribution,
+      groups_deadline_at: nextSettings.groups_deadline_at || null,
+      scorer_deadline_at: nextSettings.scorer_deadline_at || null,
+      knockout_deadline_at: nextSettings.knockout_deadline_at || null,
+      notes: nextSettings.notes || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'community_id' });
+
+    setAdminNotice(error
+      ? { type: 'error', text: `No se pudieron guardar las reglas: ${error.message}` }
+      : { type: 'ok', text: notice });
+    await refresh();
+    setBusy(null);
+  }
+
+  async function extendCommunityDeadline(phase: PredictionPhase, hours = 3) {
+    if (!settings) return;
+    const until = addHoursIso(hours);
+    const nextSettings = {
+      ...settings,
+      [deadlineField(phase)]: until,
+    };
+    setSettings(nextSettings);
+    await persistCommunitySettings(nextSettings, `Reabierto ${phaseLabel(phase)} para toda la comunidad durante ${hours} horas.`);
+  }
+
+  async function closeCommunityDeadline(phase: PredictionPhase) {
+    if (!settings) return;
+    const nextSettings = {
+      ...settings,
+      [deadlineField(phase)]: new Date().toISOString(),
+    };
+    setSettings(nextSettings);
+    await persistCommunitySettings(nextSettings, `Cerrado ${phaseLabel(phase)} desde este momento.`);
+  }
+
+  async function resetCommunityDeadlines() {
+    if (!settings) return;
+    const nextSettings = {
+      ...settings,
+      groups_deadline_at: null,
+      scorer_deadline_at: null,
+      knockout_deadline_at: null,
+    };
+    setSettings(nextSettings);
+    await persistCommunitySettings(nextSettings, 'Plazos restaurados a los valores por defecto del juego.');
+  }
+
+  async function extendMemberUnlock(userId: string, phase: PredictionPhase, hours = 3) {
+    const member = members.find((row) => row.user_id === userId);
+    const nextUnlocks = {
+      ...(member?.prediction_unlocks || {}),
+      [unlockField(phase)]: addHoursIso(hours),
+    };
+    setBusy(`unlock-${userId}`);
+    const { error } = await supabase
+      .from('community_memberships')
+      .update({ prediction_unlocks: nextUnlocks, updated_at: new Date().toISOString() })
+      .eq('user_id', userId)
+      .eq('community_id', communityId);
+    setAdminNotice(error
+      ? { type: 'error', text: `No se pudo reabrir ${phaseLabel(phase)} para el usuario: ${error.message}` }
+      : { type: 'ok', text: `Reabierto ${phaseLabel(phase)} durante ${hours} horas solo para ese usuario.` });
+    await refresh();
+    setBusy(null);
+  }
+
+  async function clearMemberUnlocks(userId: string) {
+    setBusy(`unlock-${userId}`);
+    const { error } = await supabase
+      .from('community_memberships')
+      .update({ prediction_unlocks: {}, updated_at: new Date().toISOString() })
+      .eq('user_id', userId)
+      .eq('community_id', communityId);
+    setAdminNotice(error
+      ? { type: 'error', text: `No se pudieron limpiar las reaperturas: ${error.message}` }
+      : { type: 'ok', text: 'Reaperturas individuales limpiadas para ese usuario.' });
     await refresh();
     setBusy(null);
   }
@@ -191,18 +308,7 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
 
   async function saveCommunitySettings() {
     if (!settings) return;
-    setBusy('settings');
-    const { error } = await supabase.from('community_settings').upsert({
-      community_id: communityId,
-      bizum_recipient: settings.bizum_recipient || 'Aritz',
-      entry_fee_eur: Number(settings.entry_fee_eur) || 0,
-      prize_distribution: settings.prize_distribution,
-      notes: settings.notes || null,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'community_id' });
-    if (error) alert(error.message);
-    await refresh();
-    setBusy(null);
+    await persistCommunitySettings(settings);
   }
 
   if (!admin) {
@@ -257,6 +363,57 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
       <section className="dimension-card-accent p-6">
         <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
           <div>
+            <h2 className="text-lg font-black uppercase tracking-tighter italic mb-2 flex items-center gap-3">
+              <CalendarClock className="w-5 h-5 text-brand-gold" /> Bloqueos y reaperturas
+            </h2>
+            <p className="text-sm text-brand-zinc-400 max-w-3xl">
+              Gestiona cuándo se puede editar cada parte del juego. Por defecto se mantienen los cierres oficiales; si reabres algo, los pronósticos afectados vuelven a quedar ocultos para rivales hasta el nuevo cierre.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <AdminButton onClick={() => extendCommunityDeadline('scorer', 3)} busy={busy === 'settings'} icon={LockOpen}>Abrir goleador 3h</AdminButton>
+            <AdminButton onClick={() => closeCommunityDeadline('scorer')} busy={busy === 'settings'} icon={TimerReset}>Cerrar goleador</AdminButton>
+            <AdminButton onClick={resetCommunityDeadlines} busy={busy === 'settings'} icon={RotateCcw}>Restaurar</AdminButton>
+          </div>
+        </div>
+
+        {settings && (
+          <div className="mt-6 space-y-5">
+            <div className="grid md:grid-cols-3 gap-4">
+              <DeadlineControl
+                label="Grupos y clasificados"
+                value={settings.groups_deadline_at || getPhaseDeadline('groups', settings)}
+                fallback={getPhaseDeadline('groups', null)}
+                onChange={(value) => updateDeadlineField('groups', value)}
+              />
+              <DeadlineControl
+                label="Goleador"
+                value={settings.scorer_deadline_at || getPhaseDeadline('scorer', settings)}
+                fallback={getPhaseDeadline('scorer', null)}
+                onChange={(value) => updateDeadlineField('scorer', value)}
+              />
+              <DeadlineControl
+                label="Eliminatoria"
+                value={settings.knockout_deadline_at || getPhaseDeadline('knockout', settings)}
+                fallback={getPhaseDeadline('knockout', null)}
+                onChange={(value) => updateDeadlineField('knockout', value)}
+              />
+            </div>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-xs text-brand-zinc-400">
+                Si editas una fecha manualmente, pulsa guardar. Para una excepción puntual, usa los botones de reapertura en cada usuario.
+              </p>
+              <button onClick={saveCommunitySettings} disabled={busy === 'settings'} className="dimension-button-primary px-6 flex items-center justify-center gap-2">
+                {busy === 'settings' ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Guardar plazos
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="dimension-card-accent p-6">
+        <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
+          <div>
             <h2 className="text-lg font-black uppercase tracking-tighter italic mb-2 flex items-center gap-3"><Euro className="w-5 h-5 text-brand-gold" /> Premio y Bizum</h2>
             <p className="text-sm text-brand-zinc-400">Define el pago de entrada y cómo se reparte el bote en esta comunidad.</p>
           </div>
@@ -304,7 +461,15 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
             <p className="text-xs font-black uppercase tracking-widest text-amber-100 mb-3">Validación rápida</p>
             <div className="grid gap-2">
               {pendingMembers.map((row) => (
-                <MemberRow key={`${row.user_id}-${row.community_id}`} row={row} busy={busy === row.user_id} onUpdate={updateProfileStatus} highlight />
+                <MemberRow
+                  key={`${row.user_id}-${row.community_id}`}
+                  row={row}
+                  busy={busy === row.user_id || busy === `unlock-${row.user_id}`}
+                  onUpdate={updateProfileStatus}
+                  onExtendUnlock={extendMemberUnlock}
+                  onClearUnlocks={clearMemberUnlocks}
+                  highlight
+                />
               ))}
             </div>
           </div>
@@ -315,7 +480,16 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
           </div>
         )}
         <div className="grid gap-3">
-          {approvedMembers.map((row) => <MemberRow key={`${row.user_id}-${row.community_id}`} row={row} busy={busy === row.user_id} onUpdate={updateProfileStatus} />)}
+          {approvedMembers.map((row) => (
+            <MemberRow
+              key={`${row.user_id}-${row.community_id}`}
+              row={row}
+              busy={busy === row.user_id || busy === `unlock-${row.user_id}`}
+              onUpdate={updateProfileStatus}
+              onExtendUnlock={extendMemberUnlock}
+              onClearUnlocks={clearMemberUnlocks}
+            />
+          ))}
         </div>
       </section>
 
@@ -381,17 +555,73 @@ function PrizeInput({ label, value, onChange }: { label: string; value: number; 
   );
 }
 
-function MemberRow({ row, busy, onUpdate, highlight = false }: { row: AdminMember; busy: boolean; onUpdate: (id: string, status: Profile['status']) => void; highlight?: boolean }) {
+function DeadlineControl({
+  label,
+  value,
+  fallback,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  fallback: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="space-y-2">
+      <span className="text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">{label}</span>
+      <input
+        type="datetime-local"
+        value={toDateTimeLocalValue(value)}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-brand-gold"
+      />
+      <span className="block text-[10px] text-brand-zinc-500">Por defecto: {toDateTimeLocalValue(fallback).replace('T', ' ')}</span>
+    </label>
+  );
+}
+
+function MemberRow({
+  row,
+  busy,
+  onUpdate,
+  onExtendUnlock,
+  onClearUnlocks,
+  highlight = false,
+}: {
+  row: AdminMember;
+  busy: boolean;
+  onUpdate: (id: string, status: Profile['status']) => void;
+  onExtendUnlock: (id: string, phase: PredictionPhase, hours?: number) => void;
+  onClearUnlocks: (id: string) => void;
+  highlight?: boolean;
+}) {
+  const hasUnlocks = Boolean(
+    row.prediction_unlocks?.groups_until ||
+    row.prediction_unlocks?.scorer_until ||
+    row.prediction_unlocks?.knockout_until,
+  );
+
   return (
     <div className={`grid md:grid-cols-[1fr_120px_auto] gap-3 items-center rounded-xl border p-4 ${highlight ? 'border-amber-300/20 bg-black/20' : 'border-white/10 bg-white/[0.03]'}`}>
       <div>
         <p className="text-sm font-black uppercase">{row.profiles?.username || row.profiles?.email}</p>
         <p className="text-xs text-brand-zinc-500">{row.profiles?.email}</p>
+        {hasUnlocks && (
+          <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-brand-gold">
+            Tiene reapertura activa
+          </p>
+        )}
       </div>
       <span className="text-[10px] font-black uppercase tracking-widest text-brand-gold">{row.status}</span>
       <div className="flex gap-2">
         <button onClick={() => onUpdate(row.user_id, 'approved')} disabled={busy} className="px-3 py-2 rounded-lg bg-emerald-500/20 text-emerald-300 text-[10px] font-black uppercase">Aprobar</button>
         <button onClick={() => onUpdate(row.user_id, 'blocked')} disabled={busy} className="px-3 py-2 rounded-lg bg-red-500/20 text-red-300 text-[10px] font-black uppercase">Bloquear</button>
+      </div>
+      <div className="md:col-span-3 flex flex-wrap gap-2 border-t border-white/10 pt-3">
+        <button onClick={() => onExtendUnlock(row.user_id, 'scorer', 3)} disabled={busy} className="px-3 py-2 rounded-lg bg-brand-gold/10 text-brand-gold border border-brand-gold/20 text-[10px] font-black uppercase">Goleador +3h</button>
+        <button onClick={() => onExtendUnlock(row.user_id, 'groups', 3)} disabled={busy} className="px-3 py-2 rounded-lg bg-white/5 text-brand-zinc-300 border border-white/10 text-[10px] font-black uppercase">Grupos +3h</button>
+        <button onClick={() => onExtendUnlock(row.user_id, 'knockout', 3)} disabled={busy} className="px-3 py-2 rounded-lg bg-white/5 text-brand-zinc-300 border border-white/10 text-[10px] font-black uppercase">KO +3h</button>
+        <button onClick={() => onClearUnlocks(row.user_id)} disabled={busy || !hasUnlocks} className="px-3 py-2 rounded-lg bg-black/20 text-brand-zinc-400 border border-white/10 text-[10px] font-black uppercase disabled:opacity-40">Limpiar</button>
       </div>
     </div>
   );

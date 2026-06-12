@@ -55,14 +55,17 @@ Incluye tres comunidades independientes dentro del mismo entorno:
 - Resultado exacto: 15 puntos.
 - Ganador/empate acertado: 8 puntos.
 - Goleador elegido: 10 puntos por cada gol oficial registrado.
-- Clasificados de grupo: 15 puntos por cada clasificado acertado en su posición clasificatoria.
+- Clasificación de grupo: 8 puntos por puesto exacto y 5 puntos por clasificado acertado sin puesto exacto.
 - Eliminatorias: 10 puntos por cada equipo acertado, solo si el enfrentamiento previsto coincide con el cruce real.
+- Finalistas: 40 puntos por puesto exacto y 25 puntos por finalista acertado sin puesto exacto.
 
 ## Fechas límite
 
-- Grupos, clasificados y goleador: 11 junio 2026, 20:30 Europe/Madrid.
-- Toda la fase eliminatoria: 28 junio 2026, 10:00 Europe/Madrid.
+- Por defecto, grupos y clasificados cierran el 11 junio 2026, 20:30 Europe/Madrid.
+- Por defecto, el goleador usa su propio cierre y el admin puede reabrirlo desde `Admin`.
+- Por defecto, toda la fase eliminatoria cierra el 28 junio 2026, 10:00 Europe/Madrid.
 - Los cruces que aún no estén definidos se pronostican igualmente como previsión de cuadro.
+- El admin puede reabrir plazos por comunidad o por jugador sin tocar código. Mientras una fase está reabierta, esos pronósticos permanecen ocultos para rivales hasta el nuevo cierre.
 
 ## Vercel
 

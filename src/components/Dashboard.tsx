@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { AlertCircle, CalendarCheck, CheckCircle2, ChevronRight, Download, EyeOff, Info, Lock, Medal, Share, Sparkles, Target, Trophy, UserCheck, Users } from 'lucide-react';
 import type { CommunitySettings, Profile } from '../lib/types';
-import { DIMENSION_LOGO_URL, POINTS, formatDateTime, GROUP_DEADLINE_ISO, KNOCKOUT_DEADLINE_ISO } from '../lib/constants';
+import { DIMENSION_LOGO_URL, POINTS, formatDateTime } from '../lib/constants';
+import { getPhaseDeadline } from '../lib/deadlines';
 import { canPlay, profileStatusLabel, supabase } from '../lib/supabase';
 import type { CommunityId, CommunityTheme } from '../lib/communities';
 
@@ -43,6 +44,9 @@ export default function Dashboard({
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [installState, setInstallState] = useState(() => getMobileInstallState());
   const approved = canPlay(profile, user?.email);
+  const groupDeadlineIso = getPhaseDeadline('groups', settings);
+  const scorerDeadlineIso = getPhaseDeadline('scorer', settings);
+  const knockoutDeadlineIso = getPhaseDeadline('knockout', settings);
 
   useEffect(() => {
     if (!window.localStorage.getItem('wc26_tutorial_seen')) {
@@ -219,8 +223,9 @@ export default function Dashboard({
             <h3 className="text-sm uppercase tracking-[0.2em] text-white font-black italic">Fechas límite</h3>
           </div>
           <div className="space-y-4">
-            <DeadlineItem icon={CalendarCheck} label="Grupos, clasificados y goleador" date={formatDateTime(GROUP_DEADLINE_ISO)} />
-            <DeadlineItem icon={Lock} label="Toda la fase eliminatoria" date={formatDateTime(KNOCKOUT_DEADLINE_ISO)} />
+            <DeadlineItem icon={CalendarCheck} label="Grupos y clasificados" date={formatDateTime(groupDeadlineIso)} />
+            <DeadlineItem icon={Target} label="Goleador" date={formatDateTime(scorerDeadlineIso)} />
+            <DeadlineItem icon={Lock} label="Toda la fase eliminatoria" date={formatDateTime(knockoutDeadlineIso)} />
             <DeadlineItem icon={Target} label="Cruces por prever" date="Pronostica desde dieciseisavos hasta la final aunque aún sean TBD" />
           </div>
         </div>
@@ -247,7 +252,7 @@ export default function Dashboard({
 
       <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         <NormCard icon={EyeOff} title="Privacidad" text="Los pronósticos de otros jugadores se revelan cuando ya no se pueden editar." />
-        <NormCard icon={CheckCircle2} title="Edición" text="Puedes cambiar grupos hasta el 9 de junio y el cuadro de eliminatorias hasta el 28 de junio." />
+        <NormCard icon={CheckCircle2} title="Edición" text="Puedes cambiar cada fase hasta su cierre. El admin puede reabrir una fase puntual si hace falta." />
         <NormCard icon={Medal} title="Ranking" text="La clasificación se recalcula tras cada resultado o corrección del admin." />
         <NormCard icon={Info} title="Fiabilidad" text="El calendario y resultados se sincronizan desde la API oficial de FIFA y quedan guardados." />
       </section>

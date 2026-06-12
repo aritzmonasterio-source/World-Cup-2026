@@ -140,6 +140,7 @@ export default function App() {
         points_knockout: membership?.points_knockout || 0,
         points_scorer: membership?.points_scorer || 0,
         points_qualified: membership?.points_qualified || 0,
+        prediction_unlocks: membership?.prediction_unlocks || null,
       } as Profile : null;
 
       if (mounted) {

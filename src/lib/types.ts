@@ -2,6 +2,13 @@ export type ProfileStatus = 'pending' | 'approved' | 'blocked';
 export type ProfileRole = 'player' | 'admin';
 export type MatchStatus = 'scheduled' | 'live' | 'finished' | 'postponed';
 export type CommunityId = 'dimension-football' | 'athletic-club' | 'electric-league';
+export type PredictionPhase = 'groups' | 'scorer' | 'knockout';
+
+export interface PredictionUnlocks {
+  groups_until?: string | null;
+  scorer_until?: string | null;
+  knockout_until?: string | null;
+}
 
 export interface Profile {
   id: string;
@@ -17,6 +24,7 @@ export interface Profile {
   points_qualified: number;
   previous_rank?: number | null;
   current_rank?: number | null;
+  prediction_unlocks?: PredictionUnlocks | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -33,6 +41,7 @@ export interface CommunityMembership {
   points_qualified: number;
   previous_rank?: number | null;
   current_rank?: number | null;
+  prediction_unlocks?: PredictionUnlocks | null;
   created_at?: string;
   updated_at?: string;
   profiles?: Profile;
@@ -49,6 +58,9 @@ export interface CommunitySettings {
     globalRunnerUp: number;
     globalThird: number;
   };
+  groups_deadline_at?: string | null;
+  scorer_deadline_at?: string | null;
+  knockout_deadline_at?: string | null;
   notes?: string | null;
   updated_at?: string;
 }

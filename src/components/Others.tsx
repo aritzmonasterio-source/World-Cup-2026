@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { CalendarClock, ChevronDown, Lock, Target, Trophy, Users } from 'lucide-react';
-import type { CommunityMembership, FinalistPrediction, KnockoutPrediction, Match, MatchPrediction, Profile, ScorerPrediction } from '../lib/types';
+import type { CommunityMembership, CommunitySettings, FinalistPrediction, KnockoutPrediction, Match, MatchPrediction, Profile, ScorerPrediction } from '../lib/types';
 import { canPlay, isAdmin, supabase } from '../lib/supabase';
-import { formatDateTime, GROUP_DEADLINE_ISO, KNOCKOUT_DEADLINE_ISO } from '../lib/constants';
+import { formatDateTime } from '../lib/constants';
+import { getPhaseDeadline } from '../lib/deadlines';
 import { displayTeam } from '../lib/flags';
 import type { CommunityId } from '../lib/communities';
 
@@ -27,12 +28,17 @@ export default function Others({
   const [knockoutPredictions, setKnockoutPredictions] = useState<KnockoutPrediction[]>([]);
   const [scorerPredictions, setScorerPredictions] = useState<ScorerPrediction[]>([]);
   const [finalistPredictions, setFinalistPredictions] = useState<FinalistPrediction[]>([]);
+  const [settings, setSettings] = useState<CommunitySettings | null>(null);
 
   const admin = isAdmin(profile, user?.email);
   const approved = Boolean(admin || (canPlay(profile, user?.email) && profile?.community_id === communityId));
-  const groupsOpen = now >= new Date(GROUP_DEADLINE_ISO);
-  const knockoutOpen = now >= new Date(KNOCKOUT_DEADLINE_ISO);
-  const hasAnyOpenSection = groupsOpen || knockoutOpen;
+  const groupDeadlineIso = getPhaseDeadline('groups', settings);
+  const scorerDeadlineIso = getPhaseDeadline('scorer', settings);
+  const knockoutDeadlineIso = getPhaseDeadline('knockout', settings);
+  const groupsOpen = isRevealOpen(groupDeadlineIso, now);
+  const scorerOpen = isRevealOpen(scorerDeadlineIso, now);
+  const knockoutOpen = isRevealOpen(knockoutDeadlineIso, now);
+  const hasAnyOpenSection = groupsOpen || scorerOpen || knockoutOpen;
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 60_000);
@@ -52,21 +58,25 @@ export default function Others({
           .eq('status', 'approved')
           .order('total_points', { ascending: false }),
         supabase.from('matches').select('*').order('match_number', { ascending: true }),
+        supabase.from('community_settings').select('*').eq('community_id', communityId).maybeSingle(),
       ] as const;
 
-      const [membersResult, matchesResult] = await Promise.all(baseRequests);
+      const [membersResult, matchesResult, settingsResult] = await Promise.all(baseRequests);
       setMembers(((membersResult.data || []) as MemberWithProfile[]).filter((member) => member.user_id !== user.id));
       setMatches((matchesResult.data || []) as Match[]);
+      setSettings((settingsResult.data as CommunitySettings | null) || null);
 
       if (groupsOpen) {
-        const [matchResult, scorerResult] = await Promise.all([
-          supabase.from('match_predictions').select('*').eq('community_id', communityId),
-          supabase.from('scorer_predictions').select('*').eq('community_id', communityId),
-        ]);
+        const matchResult = await supabase.from('match_predictions').select('*').eq('community_id', communityId);
         setMatchPredictions((matchResult.data || []) as MatchPrediction[]);
-        setScorerPredictions((scorerResult.data || []) as ScorerPrediction[]);
       } else {
         setMatchPredictions([]);
+      }
+
+      if (scorerOpen) {
+        const scorerResult = await supabase.from('scorer_predictions').select('*').eq('community_id', communityId);
+        setScorerPredictions((scorerResult.data || []) as ScorerPrediction[]);
+      } else {
         setScorerPredictions([]);
       }
 
@@ -86,7 +96,7 @@ export default function Others({
     }
 
     loadData();
-  }, [approved, communityId, groupsOpen, knockoutOpen, user]);
+  }, [approved, communityId, groupsOpen, knockoutOpen, scorerOpen, user]);
 
   const matchById = useMemo(() => new Map(matches.map((match) => [match.id, match])), [matches]);
   const groupPredictionsByUser = useMemo(
@@ -122,16 +132,17 @@ export default function Others({
             Se revelan por fases cuando ya no se pueden editar. Nadie puede mirar antes del cierre, ni aunque se ponga creativo con el navegador.
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <RevealStatus title="Fase 1" open={groupsOpen} date={formatDateTime(GROUP_DEADLINE_ISO)} />
-          <RevealStatus title="Eliminatoria" open={knockoutOpen} date={formatDateTime(KNOCKOUT_DEADLINE_ISO)} />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <RevealStatus title="Grupos" open={groupsOpen} date={formatDateTime(groupDeadlineIso)} />
+          <RevealStatus title="Goleador" open={scorerOpen} date={formatDateTime(scorerDeadlineIso)} />
+          <RevealStatus title="Eliminatoria" open={knockoutOpen} date={formatDateTime(knockoutDeadlineIso)} />
         </div>
       </div>
 
       {!hasAnyOpenSection && (
         <LockedShell
           title="Aún cerrado"
-          text={`Los pronósticos de grupos y goleador se abrirán al resto el ${formatDateTime(GROUP_DEADLINE_ISO)}. Hasta entonces cada jugador ve solo lo suyo.`}
+          text={`Los pronósticos se abren por fases: grupos el ${formatDateTime(groupDeadlineIso)}, goleador el ${formatDateTime(scorerDeadlineIso)} y eliminatoria el ${formatDateTime(knockoutDeadlineIso)}. Hasta entonces cada jugador ve solo lo suyo.`}
         />
       )}
 
@@ -147,8 +158,8 @@ export default function Others({
             <PlayerRevealCard
               key={`${member.user_id}-${member.community_id}`}
               member={member}
-              groupsOpen={groupsOpen}
-              knockoutOpen={knockoutOpen}
+              now={now}
+              settings={settings}
               groupPredictions={groupPredictionsByUser[member.user_id] || []}
               knockoutPredictions={knockoutPredictionsByUser[member.user_id] || []}
               scorerPrediction={scorerByUser.get(member.user_id) || null}
@@ -164,8 +175,8 @@ export default function Others({
 
 function PlayerRevealCard({
   member,
-  groupsOpen,
-  knockoutOpen,
+  now,
+  settings,
   groupPredictions,
   knockoutPredictions,
   scorerPrediction,
@@ -173,8 +184,8 @@ function PlayerRevealCard({
   matchById,
 }: {
   member: MemberWithProfile;
-  groupsOpen: boolean;
-  knockoutOpen: boolean;
+  now: Date;
+  settings: CommunitySettings | null;
   groupPredictions: MatchPrediction[];
   knockoutPredictions: KnockoutPrediction[];
   scorerPrediction: ScorerPrediction | null;
@@ -182,6 +193,10 @@ function PlayerRevealCard({
   matchById: Map<string, Match>;
 }) {
   const playerName = member.profiles?.username || member.profiles?.email || 'Jugador';
+  const memberGroupsOpen = isRevealOpen(getPhaseDeadline('groups', settings, member.prediction_unlocks), now);
+  const memberScorerOpen = isRevealOpen(getPhaseDeadline('scorer', settings, member.prediction_unlocks), now);
+  const memberKnockoutOpen = isRevealOpen(getPhaseDeadline('knockout', settings, member.prediction_unlocks), now);
+  const phaseOneCount = (memberGroupsOpen ? groupPredictions.length : 0) + (memberScorerOpen && scorerPrediction ? 1 : 0);
 
   return (
     <article className="dimension-card-accent overflow-hidden">
@@ -195,7 +210,7 @@ function PlayerRevealCard({
             <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">{member.total_points || 0} pts en ranking</p>
           </div>
         </div>
-        {groupsOpen && (
+        {memberScorerOpen && (
           <div className="rounded-full border border-brand-gold/20 bg-brand-gold/10 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-brand-gold">
             {scorerPrediction?.player_name || 'Sin goleador'}
           </div>
@@ -204,25 +219,25 @@ function PlayerRevealCard({
 
       <div className="grid lg:grid-cols-2 gap-4 p-4 sm:p-5">
         <PredictionDetails
-          title="Fase 1"
+          title="Grupos y goleador"
           icon={Target}
-          locked={!groupsOpen}
-          emptyText="Este jugador aún no tiene pronósticos visibles de fase 1."
-          count={groupPredictions.length}
+          locked={!memberGroupsOpen && !memberScorerOpen}
+          emptyText="Este jugador aún no tiene pronósticos visibles de grupos o goleador."
+          count={phaseOneCount}
         >
-          {scorerPrediction && (
+          {memberScorerOpen && scorerPrediction && (
             <div className="mb-3 rounded-xl border border-brand-gold/20 bg-brand-gold/10 p-3 text-sm">
               <span className="text-[10px] font-black uppercase tracking-widest text-brand-gold">Goleador elegido</span>
               <p className="mt-1 font-black uppercase">{scorerPrediction.player_name} · {displayTeam(scorerPrediction.team_name || 'Selección', scorerPrediction.team_code)}</p>
             </div>
           )}
-          <PredictionRows predictions={groupPredictions} matchById={matchById} />
+          {memberGroupsOpen && <PredictionRows predictions={groupPredictions} matchById={matchById} />}
         </PredictionDetails>
 
         <PredictionDetails
           title="Eliminatoria"
           icon={Trophy}
-          locked={!knockoutOpen}
+          locked={!memberKnockoutOpen}
           emptyText="Este jugador aún no tiene pronósticos visibles de eliminatoria."
           count={knockoutPredictions.length + (finalistPrediction ? 1 : 0)}
         >
@@ -390,4 +405,8 @@ function matchLabel(match: Match) {
 function isKnockoutMatch(match: Match) {
   const phase = match.phase?.toLowerCase() || '';
   return (match.round_number || 0) >= 4 || (!match.group_code && !phase.includes('group') && !phase.includes('grupo'));
+}
+
+function isRevealOpen(deadlineIso: string, now: Date) {
+  return now.getTime() >= new Date(deadlineIso).getTime();
 }
