@@ -160,6 +160,18 @@ export interface FinalistPrediction {
   updated_at?: string;
 }
 
+export interface PointEvent {
+  id: number;
+  user_id: string;
+  community_id?: CommunityId;
+  category: 'groups' | 'knockout' | 'scorer' | 'qualified';
+  points: number;
+  ref_type: string;
+  ref_id: string;
+  label: string | null;
+  created_at?: string;
+}
+
 export interface Team {
   id: string;
   code: string;

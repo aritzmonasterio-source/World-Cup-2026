@@ -3,7 +3,7 @@ import type { User } from '@supabase/supabase-js';
 import { AlertCircle, CheckCircle2, ChevronLeft, Clock, Eye, FileDown, Loader2, Lock, Medal, Save, ShieldAlert, Target, Trophy, Tv } from 'lucide-react';
 import { motion } from 'motion/react';
 import { canPlay, isAdmin, supabase } from '../lib/supabase';
-import type { CommunitySettings, FinalistPrediction, KnockoutPrediction, Match, MatchPrediction, Profile, ScorerPrediction, Team } from '../lib/types';
+import type { CommunitySettings, FinalistPrediction, KnockoutPrediction, Match, MatchPrediction, PointEvent, Profile, ScorerPrediction, Team } from '../lib/types';
 import { formatDateTime, POINTS } from '../lib/constants';
 import { getMatchDeadline, getPhaseDeadline, isDeadlineClosed } from '../lib/deadlines';
 import { displayTeam, getFlagEmoji, getFlagUrl } from '../lib/flags';
@@ -117,6 +117,7 @@ export default function Predictions({
   const [knockoutPredictions, setKnockoutPredictions] = useState<KnockoutPredictionMap>({});
   const [finalistPrediction, setFinalistPrediction] = useState<Partial<FinalistPrediction> | null>(null);
   const [scorerPrediction, setScorerPrediction] = useState<Partial<ScorerPrediction> | null>(null);
+  const [pointEvents, setPointEvents] = useState<PointEvent[]>([]);
   const [settings, setSettings] = useState<CommunitySettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -180,11 +181,12 @@ export default function Predictions({
 
       if (user && approved) {
         const draft = readPredictionDraft(user.id, communityId);
-        const [{ data: predRows }, { data: knockoutRows }, { data: finalistRow }, { data: scorerRow }] = await Promise.all([
+        const [{ data: predRows }, { data: knockoutRows }, { data: finalistRow }, { data: scorerRow }, { data: pointRows }] = await Promise.all([
           supabase.from('match_predictions').select('*').eq('user_id', user.id).eq('community_id', communityId),
           supabase.from('knockout_predictions').select('*').eq('user_id', user.id).eq('community_id', communityId),
           supabase.from('finalist_predictions').select('*').eq('user_id', user.id).eq('community_id', communityId).maybeSingle(),
           supabase.from('scorer_predictions').select('*').eq('user_id', user.id).eq('community_id', communityId).maybeSingle(),
+          supabase.from('point_events').select('*').eq('user_id', user.id).eq('community_id', communityId),
         ]);
 
         const pMap: MatchPredictionMap = {};
@@ -192,6 +194,7 @@ export default function Predictions({
           pMap[p.match_id] = p;
         });
         setMatchPredictions(mergePredictionDraft(pMap, draft.matchPredictions));
+        setPointEvents((pointRows || []) as PointEvent[]);
 
         const kMap: KnockoutPredictionMap = {};
         (knockoutRows || []).forEach((p: any) => {
@@ -215,6 +218,7 @@ export default function Predictions({
         setKnockoutPredictions({});
         setFinalistPrediction(null);
         setScorerPrediction(null);
+        setPointEvents([]);
         setScorerName('');
         setScorerTeamId('');
       }
@@ -282,6 +286,19 @@ export default function Predictions({
     });
     return table;
   }, [groupMatches, matchPredictions, teams]);
+
+  const pointEventsByMatch = useMemo(() => {
+    const grouped: Record<string, PointEvent[]> = {};
+    pointEvents.forEach((event) => {
+      const matchId = event.ref_type === 'match' ? event.ref_id : event.ref_type === 'knockout_match' ? event.ref_id.split(':')[0] : '';
+      if (!matchId) return;
+      if (!grouped[matchId]) grouped[matchId] = [];
+      grouped[matchId].push(event);
+    });
+    return grouped;
+  }, [pointEvents]);
+
+  const getMatchPointEvents = (matchId: string) => pointEventsByMatch[matchId] || [];
 
   const scheduleAutoSave = (key: string, callback: () => void) => {
     window.clearTimeout(autoSaveTimers.current[key]);
@@ -702,6 +719,7 @@ export default function Predictions({
                   const locked = !canEdit || (isKnockout ? isDeadlineClosed(knockoutDeadlineIso) : isPredictionMatchLocked(match));
                   const marketClosed = isPredictionMatchLocked(match);
                   const knockoutSaved = knockoutPred?.predicted_home_team_id && knockoutPred?.predicted_away_team_id && knockoutPred.predicted_home_team_id !== knockoutPred.predicted_away_team_id;
+                  const matchPointEvents = getMatchPointEvents(match.id);
 
                   if (isKnockout) {
                     return (
@@ -744,6 +762,7 @@ export default function Predictions({
                         )}
 
                         <div className="flex items-center justify-end gap-2">
+                          {user && approved && <MatchPointsBadge match={match} events={matchPointEvents} />}
                           {savingId === `ko-${match.id}` ? <Loader2 className="w-4 h-4 animate-spin text-brand-gold" /> : locked ? <Lock className="w-4 h-4 text-brand-zinc-500" /> : <CheckCircle2 className={`w-4 h-4 ${knockoutSaved ? 'text-emerald-400' : 'text-white/10'}`} />}
                         </div>
                       </motion.div>
@@ -790,6 +809,7 @@ export default function Predictions({
                       </div>
                       <TeamSide name={match.away_team_name} code={match.away_team_code} align="left" />
                       <div className="col-span-3 md:col-span-1 flex items-center justify-end gap-2">
+                        {user && approved && <MatchPointsBadge match={match} events={matchPointEvents} />}
                         {savingId === match.id ? <Loader2 className="w-4 h-4 animate-spin text-brand-gold" /> : marketClosed || !canEdit ? <Lock className="w-4 h-4 text-brand-zinc-500" /> : <CheckCircle2 className={`w-4 h-4 ${pred?.home_score !== undefined && pred?.away_score !== undefined ? 'text-emerald-400' : 'text-white/10'}`} />}
                       </div>
                     </motion.div>
@@ -821,6 +841,26 @@ export default function Predictions({
       <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-xs text-brand-zinc-400">
         La fase de grupos cierra el {formatDateTime(groupDeadlineIso)}. El goleador cierra el {formatDateTime(scorerDeadlineIso)}. La fase eliminatoria cierra el {formatDateTime(knockoutDeadlineIso)}.
       </div>
+    </div>
+  );
+}
+
+function MatchPointsBadge({ match, events }: { match: Match; events: PointEvent[] }) {
+  if (match.status !== 'finished') return null;
+  const total = events.reduce((sum, event) => sum + (Number(event.points) || 0), 0);
+  const positive = total > 0;
+  const label = events[0]?.label || (positive ? 'Puntos conseguidos' : 'Pronóstico sin puntos');
+
+  return (
+    <div
+      title={label}
+      className={`inline-flex min-w-[64px] items-center justify-center rounded-lg border px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest tabular-nums ${
+        positive
+          ? 'border-emerald-400/30 bg-emerald-500/15 text-emerald-200'
+          : 'border-white/10 bg-white/[0.03] text-brand-zinc-500'
+      }`}
+    >
+      {positive ? `+${total}` : '0'} pts
     </div>
   );
 }

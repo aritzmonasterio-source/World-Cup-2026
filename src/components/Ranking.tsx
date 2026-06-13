@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
-import { Activity, AlertCircle, ArrowDown, ArrowUp, CheckCircle2, Loader2, Minus, RefreshCw, Trophy } from 'lucide-react';
+import { Activity, AlertCircle, ArrowDown, ArrowUp, CheckCircle2, ChevronDown, ListChecks, Loader2, Minus, RefreshCw, Trophy } from 'lucide-react';
 import { canPlay, isAdmin, supabase } from '../lib/supabase';
 import { isSupabaseConfigured } from '../lib/supabase';
-import type { CommunityMembership, Profile } from '../lib/types';
+import type { CommunityMembership, PointEvent, Profile } from '../lib/types';
 import type { CommunityId } from '../lib/communities';
 import ConfigRequired from './ConfigRequired';
 
@@ -11,6 +11,7 @@ type RankingEntry = Omit<CommunityMembership, 'profiles'> & { profiles?: Profile
 
 export default function Ranking({ user, profile, communityId }: { user: User | null; profile: Profile | null; communityId: CommunityId }) {
   const [rankings, setRankings] = useState<RankingEntry[]>([]);
+  const [pointEvents, setPointEvents] = useState<PointEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [recalculating, setRecalculating] = useState(false);
   const [notice, setNotice] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
@@ -24,6 +25,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
     }
     if (!canViewCommunityRanking) {
       setRankings([]);
+      setPointEvents([]);
       setLoading(false);
       return;
     }
@@ -31,14 +33,23 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
   }, [canViewCommunityRanking, communityId]);
 
   async function fetchRankings() {
-    const { data } = await supabase
-      .from('community_memberships')
-      .select('*, profiles(*)')
-      .eq('community_id', communityId)
-      .eq('status', 'approved')
-      .order('total_points', { ascending: false })
-      .order('updated_at', { ascending: true });
+    const [{ data }, { data: pointRows }] = await Promise.all([
+      supabase
+        .from('community_memberships')
+        .select('*, profiles(*)')
+        .eq('community_id', communityId)
+        .eq('status', 'approved')
+        .order('total_points', { ascending: false })
+        .order('updated_at', { ascending: true }),
+      supabase
+        .from('point_events')
+        .select('*')
+        .eq('community_id', communityId)
+        .order('points', { ascending: false })
+        .order('created_at', { ascending: false }),
+    ]);
     setRankings((data || []) as RankingEntry[]);
+    setPointEvents((pointRows || []) as PointEvent[]);
     setLoading(false);
   }
 
@@ -60,6 +71,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
   }
 
   const playerComments = useMemo(() => buildPlayerComments(rankings), [rankings]);
+  const pointEventsByUser = useMemo(() => groupPointEventsByUser(pointEvents), [pointEvents]);
 
   if (loading) return <div className="flex justify-center p-20"><Loader2 className="w-8 h-8 animate-spin text-brand-gold" /></div>;
   if (!isSupabaseConfigured) return <ConfigRequired title="Ranking pendiente de Supabase" />;
@@ -124,7 +136,15 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
             </tr>
           </thead>
           <tbody>
-            {rankings.map((row, index) => <RankingRow key={`${row.user_id}-${row.community_id}`} row={row} index={index} comment={playerComments[getRankingKey(row)]} />)}
+            {rankings.map((row, index) => (
+              <RankingRow
+                key={`${row.user_id}-${row.community_id}`}
+                row={row}
+                index={index}
+                comment={playerComments[getRankingKey(row)]}
+                events={pointEventsByUser[row.user_id] || []}
+              />
+            ))}
           </tbody>
         </table>
       </div>
@@ -152,6 +172,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
               <Score label="Goles" value={row.points_scorer} />
             </div>
             <p className="mt-4 text-xs text-brand-zinc-400 italic">{playerComments[getRankingKey(row)] || fallbackPlayerComment(row, index)}</p>
+            <PointBreakdown events={pointEventsByUser[row.user_id] || []} />
           </div>
         ))}
       </div>
@@ -165,7 +186,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
   );
 }
 
-function RankingRow({ row, index, comment }: { row: RankingEntry; index: number; comment: string }) {
+function RankingRow({ row, index, comment, events }: { row: RankingEntry; index: number; comment: string; events: PointEvent[] }) {
   const rankChange = getTrend(row);
   const playerName = getPlayerName(row);
   return (
@@ -184,6 +205,7 @@ function RankingRow({ row, index, comment }: { row: RankingEntry; index: number;
           <div className="min-w-0">
             <span className="text-sm font-black uppercase tracking-tight text-white whitespace-nowrap">{playerName}</span>
             <p className="mt-1 max-w-xs text-[11px] leading-snug text-brand-zinc-500 italic normal-case">{comment || fallbackPlayerComment(row, index)}</p>
+            <PointBreakdown events={events} />
           </div>
         </div>
       </td>
@@ -193,6 +215,65 @@ function RankingRow({ row, index, comment }: { row: RankingEntry; index: number;
       <td className="p-5 text-center"><span className="text-sm font-bold text-brand-zinc-400 tabular-nums">{row.points_qualified}</span></td>
       <td className="p-5 text-center"><span className="text-sm font-bold text-brand-zinc-400 tabular-nums">{row.points_scorer}</span></td>
     </tr>
+  );
+}
+
+function PointBreakdown({ events }: { events: PointEvent[] }) {
+  const sortedEvents = sortPointEvents(events);
+  const totals = getPointEventTotals(sortedEvents);
+  const visibleEvents = sortedEvents.slice(0, 12);
+  const hiddenCount = Math.max(sortedEvents.length - visibleEvents.length, 0);
+  const totalPoints = sortedEvents.reduce((sum, event) => sum + toScore(event.points), 0);
+
+  return (
+    <details className="group mt-3 rounded-xl border border-white/10 bg-black/20 open:bg-black/30">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-brand-gold">
+        <span className="flex items-center gap-2">
+          <ListChecks className="h-3.5 w-3.5" />
+          Expandir puntuación
+        </span>
+        <span className="flex items-center gap-2 text-brand-zinc-500">
+          {totalPoints} pts
+          <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
+        </span>
+      </summary>
+      <div className="border-t border-white/10 p-3">
+        {sortedEvents.length === 0 ? (
+          <p className="text-[11px] leading-relaxed text-brand-zinc-500">
+            Todavía no hay eventos de puntuación para este jugador. Cuando se cierre un resultado real, aquí saldrá el detalle.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
+              {totals.map((item) => (
+                <div key={item.key} className="rounded-lg border border-white/10 bg-white/[0.03] px-2 py-2">
+                  <p className="text-[8px] font-black uppercase tracking-widest text-brand-zinc-500">{item.label}</p>
+                  <p className="mt-1 text-sm font-black text-brand-gold tabular-nums">{item.points}</p>
+                </div>
+              ))}
+            </div>
+            <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+              {visibleEvents.map((event) => (
+                <div key={`${event.id}-${event.ref_id}`} className="grid grid-cols-[58px_1fr] gap-3 rounded-lg border border-white/5 bg-white/[0.03] p-2">
+                  <span className="rounded-md border border-emerald-400/25 bg-emerald-500/10 px-2 py-1 text-center text-[10px] font-black text-emerald-200 tabular-nums">
+                    +{event.points}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">{getPointCategoryLabel(event.category)}</p>
+                    <p className="mt-0.5 text-[11px] leading-snug text-brand-zinc-300">{event.label || getFallbackPointLabel(event)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {hiddenCount > 0 && (
+              <p className="text-[10px] font-bold uppercase tracking-widest text-brand-zinc-500">
+                Y {hiddenCount} evento(s) más.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -713,6 +794,54 @@ function shortName(value: unknown) {
 
 function getRankingKey(row: RankingEntry) {
   return `${row.user_id}-${row.community_id}`;
+}
+
+function groupPointEventsByUser(events: PointEvent[]) {
+  return events.reduce<Record<string, PointEvent[]>>((acc, event) => {
+    if (!acc[event.user_id]) acc[event.user_id] = [];
+    acc[event.user_id].push(event);
+    return acc;
+  }, {});
+}
+
+function sortPointEvents(events: PointEvent[]) {
+  const categoryOrder: Record<PointEvent['category'], number> = {
+    groups: 1,
+    qualified: 2,
+    scorer: 3,
+    knockout: 4,
+  };
+  return [...events].sort((a, b) =>
+    (categoryOrder[a.category] - categoryOrder[b.category]) ||
+    (toScore(b.points) - toScore(a.points)) ||
+    safeText(a.label || '', '').localeCompare(safeText(b.label || '', ''), 'es'),
+  );
+}
+
+function getPointEventTotals(events: PointEvent[]) {
+  const totals = new Map<PointEvent['category'], number>();
+  events.forEach((event) => {
+    totals.set(event.category, (totals.get(event.category) || 0) + toScore(event.points));
+  });
+  return (['groups', 'qualified', 'scorer', 'knockout'] as PointEvent['category'][])
+    .map((key) => ({ key, label: getPointCategoryLabel(key), points: totals.get(key) || 0 }))
+    .filter((item) => item.points > 0);
+}
+
+function getPointCategoryLabel(category: PointEvent['category']) {
+  if (category === 'groups') return 'Partidos grupo';
+  if (category === 'qualified') return 'Clasificados';
+  if (category === 'scorer') return 'Goleador';
+  return 'Eliminatoria';
+}
+
+function getFallbackPointLabel(event: PointEvent) {
+  if (event.ref_type === 'match') return 'Pronóstico de partido acertado';
+  if (event.ref_type === 'group_position') return 'Puesto exacto de grupo';
+  if (event.ref_type === 'group_qualified') return 'Clasificado de grupo acertado';
+  if (event.ref_type === 'scorer') return 'Gol del goleador elegido';
+  if (event.ref_type === 'finalist') return 'Finalista acertado';
+  return 'Evento de puntuación';
 }
 
 function Score({ label, value }: { label: string; value: number }) {
