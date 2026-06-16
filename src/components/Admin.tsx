@@ -210,11 +210,11 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
   async function syncFifa() {
     setAdminNotice(null);
     setBusy('sync');
-    const { data, error } = await supabase.functions.invoke<{ ok: boolean; matches?: number }>('sync-fifa-matches');
+    const { data, error } = await supabase.functions.invoke<{ ok: boolean; matches?: number; scorers?: number; scorerSource?: string }>('sync-fifa-matches');
     const summary = await loadResultSummary();
     setAdminNotice(error
-      ? { type: 'error', text: `No se pudo sincronizar FIFA: ${error.message}` }
-      : buildRecalculateNotice('Calendario y resultados sincronizados', summary, data?.matches));
+      ? { type: 'error', text: `No se pudieron sincronizar marcadores: ${error.message}` }
+      : buildRecalculateNotice('Calendario, resultados y goleadores sincronizados', summary, data?.matches));
     await refresh();
     setBusy(null);
   }
@@ -234,7 +234,7 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
     setAdminNotice(error
       ? { type: 'error', text: `Error al calcular puntos: ${error.message}` }
       : syncError
-        ? { type: 'warning', text: `Puntos recalculados con los datos ya guardados, pero FIFA no respondió ahora mismo: ${syncError}` }
+        ? { type: 'warning', text: `Puntos recalculados con los datos ya guardados, pero la sincronización externa no respondió ahora mismo: ${syncError}` }
         : buildRecalculateNotice('Puntos recalculados correctamente', summary, syncedMatches));
     await refresh();
     setBusy(null);
@@ -253,7 +253,7 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
   }
 
   function buildRecalculateNotice(prefix: string, summary: ResultSummary, syncedMatches?: number): AdminNotice {
-    const syncText = syncedMatches ? ` FIFA ha devuelto ${syncedMatches} partidos.` : '';
+    const syncText = syncedMatches ? ` La sincronización ha devuelto ${syncedMatches} partidos.` : '';
     if (summary.finishedMatches === 0) {
       return {
         type: 'ok',
@@ -330,7 +330,7 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <AdminButton onClick={syncFifa} busy={busy === 'sync'} icon={RefreshCw}>Sincronizar FIFA</AdminButton>
+          <AdminButton onClick={syncFifa} busy={busy === 'sync'} icon={RefreshCw}>Sincronizar marcadores</AdminButton>
           <AdminButton onClick={() => recalculate(true)} busy={busy === 'recalculate'} icon={CheckCircle2}>Actualizar y recalcular</AdminButton>
         </div>
       </div>

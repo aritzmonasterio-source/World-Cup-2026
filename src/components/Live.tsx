@@ -96,7 +96,7 @@ export default function Live() {
           </div>
           <h1 className="mt-2 text-3xl font-black uppercase tracking-tighter italic">Goleadores <span className="text-brand-gold">Mundial 2026</span></h1>
           <p className="mt-2 text-sm text-brand-zinc-400 max-w-2xl">
-            Esta vista recoge los goles reales sincronizados desde FIFA o corregidos por el admin. Sirve como fuente para puntuar el goleador elegido.
+            Esta vista recoge los goles reales sincronizados desde FIFA/ESPN o corregidos por el admin. Sirve como fuente para puntuar el goleador elegido.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -134,7 +134,7 @@ export default function Live() {
           <div className="p-10 text-center">
             <Medal className="mx-auto mb-4 h-10 w-10 text-brand-gold/60" />
             <h2 className="text-lg font-black uppercase tracking-tighter">Aún no hay goleadores oficiales</h2>
-            <p className="mt-2 text-sm text-brand-zinc-400">Cuando FIFA publique los eventos de gol o el admin los valide, aparecerán aquí automáticamente.</p>
+            <p className="mt-2 text-sm text-brand-zinc-400">Cuando FIFA o ESPN publiquen goles oficiales, aparecerán aquí automáticamente y recalcularán el ranking.</p>
           </div>
         ) : (
           goals.map((row, index) => (
