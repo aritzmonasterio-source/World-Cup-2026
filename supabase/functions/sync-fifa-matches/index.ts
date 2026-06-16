@@ -33,6 +33,15 @@ const FLAG_BY_CODE: Record<string, string> = {
   POR: 'pt', COD: 'cd', UZB: 'uz', COL: 'co', ENG: 'gb-eng', CRO: 'hr', GHA: 'gh', PAN: 'pa',
 };
 
+const ESPN_TEAM_CODE_ALIAS: Record<string, string> = {
+  ALE: 'GER',
+  CUR: 'CUW',
+  EGI: 'EGY',
+  EUA: 'USA',
+  SAU: 'KSA',
+  SUE: 'SWE',
+};
+
 const TEAM_CODE_BY_NAME: Record<string, string> = Object.entries(TEAM_NAME_ES).reduce((acc, [code, name]) => {
   acc[normalizeText(name)] = code;
   return acc;
@@ -447,15 +456,13 @@ async function syncEspnScorers(supabase: any) {
       const text = await response.text();
       const payloads = parsePossibleJsonPayloads(text);
       const scorers = payloads.flatMap(readEspnScorers).filter((row) => row.goals > 0);
-      const rows = await keepHighestKnownGoalTotals(supabase, mergeExternalScorers(scorers));
+      const rows = mergeExternalScorers(scorers);
       if (!rows.length) {
         errors.push(`${new URL(url).host}: sin goleadores en payload`);
         continue;
       }
 
-      const { error } = await supabase.from('player_goals').upsert(rows, { onConflict: 'player_key' });
-      assertNoError(error, 'player_goals ESPN upsert');
-      await cleanupDuplicateGoalRows(supabase, rows);
+      await replacePlayerGoals(supabase, rows);
       return { source: 'espn', scorers: rows.length, note: null as string | null };
     } catch (error) {
       errors.push(`${new URL(url).host}: ${describeError(error)}`);
@@ -514,18 +521,12 @@ function readEspnScorers(payload: unknown) {
     }
     if (typeof value !== 'object') return;
 
-    const context = [...path, readString(value.name), readString(value.displayName), readString(value.shortDisplayName), readString(value.label)].join(' ');
-    const goalContext = isGoalsContext(context);
-
-    if (Array.isArray(value.leaders) && goalContext) {
+    if (Array.isArray(value.leaders) && isGoalLeaderCategory(value)) {
       value.leaders.forEach((leader: any) => {
         const scorer = readEspnLeader(leader, true);
         if (scorer) scorers.push(scorer);
       });
     }
-
-    const directScorer = readEspnLeader(value, goalContext);
-    if (directScorer) scorers.push(directScorer);
 
     Object.entries(value).forEach(([key, child]) => walk(child, [...path, key], depth + 1));
   };
@@ -536,9 +537,11 @@ function readEspnScorers(payload: unknown) {
 
 function readEspnLeader(value: any, forceGoalContext = false): ExternalScorer | null {
   if (!value || typeof value !== 'object') return null;
+  if (forceGoalContext && !value.athlete && !value.player && !value.person) return null;
   const athlete = value.athlete || value.player || value.person || value;
   const playerName = readEspnName(athlete) || readEspnName(value);
   if (!playerName) return null;
+  if (isStatLabelName(playerName)) return null;
 
   const goals = readEspnGoals(value, forceGoalContext);
   if (!goals) return null;
@@ -566,6 +569,10 @@ function readEspnName(value: any) {
 }
 
 function readEspnGoals(value: any, forceGoalContext: boolean) {
+  if (forceGoalContext) {
+    return numberFromValue(value.value);
+  }
+
   const direct = [
     value.value,
     value.total,
@@ -591,6 +598,27 @@ function readEspnGoals(value: any, forceGoalContext: boolean) {
   }
 
   return forceGoalContext ? direct || 0 : 0;
+}
+
+function isStatLabelName(value: string) {
+  return [
+    'asistencias',
+    'goles',
+    'goals',
+    'totaldegoles',
+    'tiros',
+    'faltas',
+    'tarjetas',
+  ].includes(normalizeText(value));
+}
+
+function isGoalLeaderCategory(value: any) {
+  const name = normalizeText(value?.name);
+  if (name === 'goalsleaders' || name === 'goalsleader') return true;
+
+  const display = normalizeText(value?.displayName || value?.shortDisplayName || value?.label);
+  const abbreviation = normalizeText(value?.abbreviation);
+  return ['goles', 'goals'].includes(display) && ['g', 'gls', ''].includes(abbreviation);
 }
 
 function mergeExternalScorers(scorers: ExternalScorer[]) {
@@ -636,20 +664,19 @@ async function cleanupDuplicateGoalRows(supabase: any, canonicalRows: PlayerGoal
   }
 }
 
-async function keepHighestKnownGoalTotals(supabase: any, rows: PlayerGoalRow[]) {
-  if (!rows.length) return rows;
-  const { data, error } = await supabase.from('player_goals').select('player_key, player_name, team_id, team_code, goals');
-  if (error || !data) return rows;
-  return rows.map((row) => {
-    const samePlayerRows = (data as PlayerGoalRow[]).filter((current) => {
-      if (current.player_key === row.player_key) return true;
-      const sameName = normalizeText(canonicalPlayerName(current.player_name)) === normalizeText(canonicalPlayerName(row.player_name));
-      const sameTeam = !current.team_code || !row.team_code || current.team_code === row.team_code || current.team_id === row.team_id;
-      return sameName && sameTeam;
-    });
-    const highestCurrent = samePlayerRows.reduce((max, current) => Math.max(max, Number(current.goals) || 0), 0);
-    return { ...row, goals: Math.max(row.goals, highestCurrent) };
-  });
+async function replacePlayerGoals(supabase: any, rows: PlayerGoalRow[]) {
+  const incomingKeys = new Set(rows.map((row) => row.player_key));
+  const { data, error: selectError } = await supabase.from('player_goals').select('player_key');
+  assertNoError(selectError, 'player_goals select before ESPN replace');
+
+  for (const current of data || []) {
+    if (incomingKeys.has(current.player_key)) continue;
+    const { error: deleteError } = await supabase.from('player_goals').delete().eq('player_key', current.player_key);
+    assertNoError(deleteError, `player_goals stale delete ${current.player_key}`);
+  }
+
+  const { error } = await supabase.from('player_goals').upsert(rows, { onConflict: 'player_key' });
+  assertNoError(error, 'player_goals ESPN upsert');
 }
 
 function canonicalPlayerName(name: string) {
@@ -665,7 +692,8 @@ function goalIdentity(row: Pick<PlayerGoalRow, 'player_name' | 'team_code' | 'te
 }
 
 function normalizeTeamCode(code: string | null, name: string | null) {
-  const upperCode = code?.trim().toUpperCase();
+  const rawCode = code?.trim().toUpperCase();
+  const upperCode = rawCode ? ESPN_TEAM_CODE_ALIAS[rawCode] || rawCode : null;
   if (upperCode && TEAM_NAME_ES[upperCode]) return upperCode;
   if (!name) return upperCode || null;
   return TEAM_CODE_BY_NAME[normalizeText(name)] || upperCode || null;
