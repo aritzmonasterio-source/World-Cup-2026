@@ -8,6 +8,8 @@ const ESPN_SCORERS_URLS = [
   'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/statistics?region=us&lang=es&season=2026',
   'https://espndeportes.espn.com/futbol/estadisticas/_/liga/FIFA.WORLD/temporada/2026/copa-mundial',
 ];
+const ESPN_SCOREBOARD_URL = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260611-20260720&limit=300&region=es&lang=es';
+const ESPN_SUMMARY_URL = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/summary?region=es&lang=es&event=';
 
 const TEAM_NAME_ES: Record<string, string> = {
   MEX: 'México', RSA: 'Sudáfrica', KOR: 'Corea del Sur', CZE: 'Chequia',
@@ -61,12 +63,19 @@ const TEAM_CODE_BY_NAME: Record<string, string> = Object.entries(TEAM_NAME_ES).r
   [normalizeText('France')]: 'FRA',
   [normalizeText('Norway')]: 'NOR',
   [normalizeText('Argentina')]: 'ARG',
+  [normalizeText('Algeria')]: 'ALG',
+  [normalizeText('Argelia')]: 'ALG',
+  [normalizeText('Arabia Saudita')]: 'KSA',
   [normalizeText('Portugal')]: 'POR',
   [normalizeText('Colombia')]: 'COL',
   [normalizeText('England')]: 'ENG',
   [normalizeText('Uruguay')]: 'URU',
   [normalizeText('Sweden')]: 'SWE',
   [normalizeText('Turkey')]: 'TUR',
+  [normalizeText('Curacao')]: 'CUW',
+  [normalizeText('Curaçao')]: 'CUW',
+  [normalizeText('República Democrática del Congo')]: 'COD',
+  [normalizeText('Republica Democratica del Congo')]: 'COD',
 } as Record<string, string>);
 
 const CANONICAL_SCORER_NAMES: Record<string, string> = [
@@ -217,6 +226,7 @@ Deno.serve(async () => {
     assertNoError(tvError, 'recalculate_match_tv_channels');
     const { error: pointsError } = await supabase.rpc('recalculate_points');
     assertNoError(pointsError, 'recalculate_points');
+    const scorerPointSummary = await loadScorerPointSummary(supabase);
     const { error: updateSyncRunError } = await supabase.from('sync_runs').update({
       ok: true,
       finished_at: new Date().toISOString(),
@@ -229,6 +239,8 @@ Deno.serve(async () => {
         espn_scorers: espnScorers,
         scorer_source: scorerSource,
         scorer_sync_note: scorerSyncNote,
+        scorer_point_events: scorerPointSummary.events,
+        scorer_points: scorerPointSummary.points,
       },
     }).eq('id', syncRun?.id);
     assertNoError(updateSyncRunError, 'sync_runs ok update');
@@ -240,6 +252,8 @@ Deno.serve(async () => {
       scorers: fifaScorers || espnScorers,
       scorerSource,
       scorerSyncNote,
+      scorerPointEvents: scorerPointSummary.events,
+      scorerPoints: scorerPointSummary.points,
     });
   } catch (error) {
     const message = describeError(error);
@@ -269,6 +283,18 @@ interface GoalEventRow {
   own_goal: boolean;
   raw: unknown;
   updated_at: string;
+}
+
+async function loadScorerPointSummary(supabase: any) {
+  const { data, error } = await supabase
+    .from('point_events')
+    .select('points')
+    .eq('category', 'scorer');
+  assertNoError(error, 'point_events scorer summary');
+  return {
+    events: (data || []).length,
+    points: (data || []).reduce((sum: number, row: any) => sum + (Number(row.points) || 0), 0),
+  };
 }
 
 interface PlayerGoalRow {
@@ -438,6 +464,7 @@ function aggregateGoalEvents(events: GoalEventRow[]) {
 
 async function syncEspnScorers(supabase: any) {
   const errors: string[] = [];
+  const eventScorers = await fetchEspnEventScorers(errors);
 
   for (const url of ESPN_SCORERS_URLS) {
     try {
@@ -455,7 +482,10 @@ async function syncEspnScorers(supabase: any) {
 
       const text = await response.text();
       const payloads = parsePossibleJsonPayloads(text);
-      const scorers = payloads.flatMap(readEspnScorers).filter((row) => row.goals > 0);
+      const scorers = [
+        ...eventScorers,
+        ...payloads.flatMap(readEspnScorers),
+      ].filter((row) => row.goals > 0);
       const rows = mergeExternalScorers(scorers);
       if (!rows.length) {
         errors.push(`${new URL(url).host}: sin goleadores en payload`);
@@ -463,7 +493,11 @@ async function syncEspnScorers(supabase: any) {
       }
 
       await replacePlayerGoals(supabase, rows);
-      return { source: 'espn', scorers: rows.length, note: null as string | null };
+      return {
+        source: eventScorers.length ? 'espn-events+stats' : 'espn-stats',
+        scorers: rows.length,
+        note: null as string | null,
+      };
     } catch (error) {
       errors.push(`${new URL(url).host}: ${describeError(error)}`);
     }
@@ -473,6 +507,109 @@ async function syncEspnScorers(supabase: any) {
     source: 'espn',
     scorers: 0,
     note: errors.length ? `ESPN no devolvió goleadores utilizables: ${errors.slice(0, 3).join(' | ')}` : 'ESPN sin datos utilizables',
+  };
+}
+
+async function fetchEspnEventScorers(errors: string[]) {
+  try {
+    const scoreboard = await fetchJson(ESPN_SCOREBOARD_URL);
+    const events = asArray(scoreboard?.events)
+      .filter(isEspnCompletedEvent)
+      .map((event: any) => readString(event.id))
+      .filter(Boolean);
+
+    const summaries = await mapInBatches(events, 8, async (eventId) => {
+      try {
+        return await fetchJson(`${ESPN_SUMMARY_URL}${eventId}`);
+      } catch (error) {
+        errors.push(`summary ${eventId}: ${describeError(error)}`);
+        return null;
+      }
+    });
+
+    return summaries.flatMap((summary) => readEspnSummaryScorers(summary)).filter((row) => row.goals > 0);
+  } catch (error) {
+    errors.push(`scoreboard: ${describeError(error)}`);
+    return [];
+  }
+}
+
+async function fetchJson(url: string) {
+  const response = await fetch(url, {
+    headers: {
+      accept: 'application/json,text/plain,*/*',
+      'accept-language': 'es-ES,es;q=0.9,en;q=0.7',
+      'user-agent': 'Mozilla/5.0 WorldCup2026Predictor/1.0',
+    },
+  });
+  if (!response.ok) throw new Error(`${new URL(url).host}: ${response.status}`);
+  return await response.json();
+}
+
+async function mapInBatches<T, R>(items: T[], batchSize: number, mapper: (item: T) => Promise<R>) {
+  const results: R[] = [];
+  for (let index = 0; index < items.length; index += batchSize) {
+    const batch = items.slice(index, index + batchSize);
+    results.push(...await Promise.all(batch.map(mapper)));
+  }
+  return results;
+}
+
+function isEspnCompletedEvent(event: any) {
+  const competitions = asArray(event?.competitions);
+  const status = event?.status?.type || competitions[0]?.status?.type || {};
+  return status.completed === true
+    || normalizeText(status.name) === 'statusfinal'
+    || normalizeText(status.description).includes('tiempocompleto')
+    || normalizeText(status.description).includes('final');
+}
+
+function readEspnSummaryScorers(summary: any) {
+  if (!summary || typeof summary !== 'object') return [];
+  const rows: ExternalScorer[] = [];
+  const seen = new Set<string>();
+  const plays = [
+    ...asArray(summary?.header?.competitions?.[0]?.details),
+    ...asArray(summary?.keyEvents),
+    ...asArray(summary?.commentary).map((item) => item?.play).filter(Boolean),
+  ];
+
+  plays.forEach((play, index) => {
+    const row = readEspnGoalPlay(play, index);
+    if (!row) return;
+    const key = `${normalizeText(row.playerName)}|${row.teamCode || normalizeText(row.teamName || '')}|${readString(play?.clock?.displayValue) || index}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push(row);
+  });
+
+  return rows;
+}
+
+function readEspnGoalPlay(play: any, index: number): ExternalScorer | null {
+  if (!play || typeof play !== 'object') return null;
+  if (play.ownGoal === true || play.own_goal === true) return null;
+
+  const typeText = [play?.type?.type, play?.type?.text, play?.type?.name, play?.shortText, play?.text].map(readString).join(' ');
+  const isGoal = play.scoringPlay === true
+    && (normalizeText(typeText).includes('goal') || normalizeText(typeText).includes('gol'));
+  if (!isGoal) return null;
+
+  const scorer = asArray(play.participants)
+    .map((participant) => participant?.athlete)
+    .find((athlete) => readEspnName(athlete));
+  const playerName = readEspnName(scorer);
+  if (!playerName || isStatLabelName(playerName)) return null;
+
+  const teamName = readString(play?.team?.displayName) || readString(play?.team?.name) || readString(play?.team?.location) || null;
+  const rawTeamCode = readString(play?.team?.abbreviation) || readString(play?.team?.code) || null;
+  const teamCode = normalizeTeamCode(rawTeamCode, teamName);
+
+  return {
+    playerName: canonicalPlayerName(playerName),
+    teamName: teamCode ? TEAM_NAME_ES[teamCode] || teamName : teamName,
+    teamCode,
+    goals: 1,
   };
 }
 
