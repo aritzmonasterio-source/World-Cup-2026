@@ -8,6 +8,10 @@ const ESPN_SCORERS_URLS = [
   'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/statistics?region=us&lang=es&season=2026',
   'https://espndeportes.espn.com/futbol/estadisticas/_/liga/FIFA.WORLD/temporada/2026/copa-mundial',
 ];
+const FBREF_SCORERS_URLS = [
+  'https://fbref.com/en/comps/1/World-Cup-Stats',
+  'https://fbref.com/en/comps/1/stats/World-Cup-Stats',
+];
 const ESPN_SCOREBOARD_URL = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260611-20260720&limit=300&region=es&lang=es';
 const ESPN_SUMMARY_URL = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/summary?region=es&lang=es&event=';
 
@@ -223,19 +227,16 @@ Deno.serve(async () => {
     assertNoError(storedGoalsError, 'match_goal_events select');
 
     const aggregatedGoals = aggregateGoalEvents((storedGoalEvents || []) as GoalEventRow[]);
-    const espnSync = await fetchEspnScorerRows();
-    const espnKeys = new Set(espnSync.rows.map((row) => playerGoalRowKey(row)));
-    const mergedGoals = mergePlayerGoalRows([
-      ...espnSync.rows,
-      ...aggregatedGoals.filter((row) => !espnKeys.has(playerGoalRowKey(row))),
-    ]);
+    const scorerSync = await fetchScorerRows();
+    const selectedGoalRows = scorerSync.rows.length ? scorerSync.rows : aggregatedGoals;
+    const mergedGoals = mergePlayerGoalRows(selectedGoalRows);
     fifaScorers = aggregatedGoals.length;
-    espnScorers = espnSync.rows.length;
-    scorerSyncNote = espnSync.note;
+    espnScorers = scorerSync.rows.length;
+    scorerSyncNote = scorerSync.note;
 
     if (mergedGoals.length) {
       await replacePlayerGoals(supabase, mergedGoals);
-      scorerSource = fifaScorers && espnScorers ? `fifa+${espnSync.source}` : fifaScorers ? 'fifa' : espnSync.source;
+      scorerSource = scorerSync.rows.length ? scorerSync.source : 'fifa-events';
     }
 
     const { error: tvError } = await supabase.rpc('recalculate_match_tv_channels');
@@ -331,7 +332,7 @@ interface ExternalScorer {
   teamName: string | null;
   teamCode: string | null;
   goals: number;
-  source?: 'event' | 'stats';
+  source?: 'event' | 'stats' | 'fbref';
 }
 
 function normalizeTeam(team: any) {
@@ -494,7 +495,7 @@ function aggregateGoalEvents(events: GoalEventRow[]) {
 }
 
 async function syncEspnScorers(supabase: any) {
-  const result = await fetchEspnScorerRows();
+  const result = await fetchScorerRows();
   if (result.rows.length) await replacePlayerGoals(supabase, result.rows);
   return {
     source: result.source,
@@ -503,9 +504,17 @@ async function syncEspnScorers(supabase: any) {
   };
 }
 
-async function fetchEspnScorerRows() {
+async function fetchScorerRows() {
   const errors: string[] = [];
-  const eventScorers = await fetchEspnEventScorers(errors);
+  const fbref = await fetchFbrefScorerRows(errors);
+  const fbrefRows = fbref.rows;
+  if (fbrefRows.length) {
+    return {
+      source: 'fbref',
+      rows: fbrefRows,
+      note: fbref.note,
+    };
+  }
 
   for (const url of ESPN_SCORERS_URLS) {
     try {
@@ -523,18 +532,64 @@ async function fetchEspnScorerRows() {
 
       const text = await response.text();
       const payloads = parsePossibleJsonPayloads(text);
-      const scorers = [
-        ...eventScorers,
-        ...payloads.flatMap(readEspnScorers),
-      ].filter((row) => row.goals > 0);
-      const rows = mergeExternalScorers(scorers);
-      if (!rows.length) {
+      const statRows = mergeExternalScorers(payloads.flatMap(readEspnScorers).filter((row) => row.goals > 0));
+      if (!statRows.length) {
         errors.push(`${new URL(url).host}: sin goleadores en payload`);
         continue;
       }
 
       return {
-        source: eventScorers.length ? 'espn-events+stats' : 'espn-stats',
+        source: 'espn-stats',
+        rows: statRows,
+        note: fbref.note,
+      };
+    } catch (error) {
+      errors.push(`${new URL(url).host}: ${describeError(error)}`);
+    }
+  }
+
+  const eventScorers = await fetchEspnEventScorers(errors);
+  const eventRows = mergeExternalScorers(eventScorers.filter((row) => row.goals > 0));
+  if (eventRows.length) {
+    return {
+      source: 'espn-events',
+      rows: eventRows,
+      note: errors.length ? `FBref/ESPN stats no respondieron; se usaron eventos ESPN: ${errors.slice(0, 3).join(' | ')}` : fbref.note,
+    };
+  }
+
+  return {
+    source: 'none',
+    rows: [] as PlayerGoalRow[],
+    note: errors.length ? `Ninguna fuente externa devolvió goleadores utilizables: ${errors.slice(0, 3).join(' | ')}` : 'Sin datos utilizables',
+  };
+}
+
+async function fetchFbrefScorerRows(errors: string[]) {
+  for (const url of FBREF_SCORERS_URLS) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'accept-language': 'es-ES,es;q=0.9,en;q=0.7',
+          referer: 'https://fbref.com/',
+          'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36',
+        },
+      });
+      if (!response.ok) {
+        errors.push(`${new URL(url).host}: ${response.status}`);
+        continue;
+      }
+
+      const text = await response.text();
+      const rows = mergeExternalScorers(readFbrefScorers(text));
+      if (!rows.length) {
+        errors.push(`${new URL(url).host}: sin filas Goals utilizables`);
+        continue;
+      }
+
+      return {
+        source: 'fbref',
         rows,
         note: null as string | null,
       };
@@ -543,20 +598,59 @@ async function fetchEspnScorerRows() {
     }
   }
 
-  const eventRows = mergeExternalScorers(eventScorers.filter((row) => row.goals > 0));
-  if (eventRows.length) {
-    return {
-      source: 'espn-events',
-      rows: eventRows,
-      note: errors.length ? `ESPN stats no respondió; se usaron eventos de partido: ${errors.slice(0, 3).join(' | ')}` : null,
-    };
-  }
-
   return {
-    source: 'espn',
+    source: 'fbref',
     rows: [] as PlayerGoalRow[],
-    note: errors.length ? `ESPN no devolvió goleadores utilizables: ${errors.slice(0, 3).join(' | ')}` : 'ESPN sin datos utilizables',
+    note: 'FBref no devolvió una tabla Goals utilizable en esta sincronización',
   };
+}
+
+function readFbrefScorers(html: string) {
+  const scorers: ExternalScorer[] = [];
+  const tables = html.match(/<table[\s\S]*?<\/table>/gi) || [];
+  const candidateTables = tables.filter((table) =>
+    /data-stat=["']player["']/i.test(table)
+    && /data-stat=["']goals["']/i.test(table)
+    && (/id=["'][^"']*stats_standard/i.test(table) || /data-stat=["']minutes["']/i.test(table) || /data-stat=["']starts["']/i.test(table))
+  );
+
+  candidateTables.forEach((table) => {
+    const rows = table.match(/<tr[\s\S]*?<\/tr>/gi) || [];
+    rows.forEach((row) => {
+      if (/class=["'][^"']*thead/i.test(row)) return;
+      const playerName = readFbrefCell(row, 'player');
+      const goals = numberFromValue(readFbrefCell(row, 'goals'));
+      if (!playerName || isStatLabelName(playerName) || goals <= 0) return;
+
+      const squad = readFbrefCell(row, 'team') || readFbrefCell(row, 'squad') || readFbrefCell(row, 'team_name');
+      const nationality = readFbrefCell(row, 'nationality') || readFbrefCell(row, 'nation');
+      const teamCode = normalizeTeamCode(readFbrefTeamCode(squad, nationality), squad || nationality);
+      const teamName = teamCode ? TEAM_NAME_ES[teamCode] || squad || nationality || null : squad || nationality || null;
+
+      scorers.push({
+        playerName: canonicalPlayerName(playerName),
+        teamName,
+        teamCode,
+        goals,
+        source: 'fbref',
+      });
+    });
+  });
+
+  return dedupeExternalScorers(scorers);
+}
+
+function readFbrefCell(row: string, dataStat: string) {
+  const pattern = new RegExp(`<(?:td|th)[^>]*data-stat=["']${dataStat}["'][^>]*>([\\s\\S]*?)<\\/(?:td|th)>`, 'i');
+  const value = row.match(pattern)?.[1] || '';
+  return stripHtml(value);
+}
+
+function readFbrefTeamCode(squad: string | null, nationality: string | null) {
+  const combined = [squad, nationality].filter(Boolean).join(' ');
+  const explicitCode = combined.match(/\b[A-Z]{3}\b/)?.[0] || null;
+  if (explicitCode) return explicitCode;
+  return null;
 }
 
 async function fetchEspnEventScorers(errors: string[]) {
@@ -628,6 +722,8 @@ function readEspnSummaryScorers(summary: any) {
   const seen = new Set<string>();
   const plays = [
     ...asArray(summary?.header?.competitions?.[0]?.details),
+    ...asArray(summary?.scoringPlays),
+    ...asArray(summary?.drives).flatMap((drive) => asArray(drive?.plays)),
     ...asArray(summary?.keyEvents),
     ...asArray(summary?.commentary).map((item) => item?.play).filter(Boolean),
   ];
@@ -635,7 +731,12 @@ function readEspnSummaryScorers(summary: any) {
   plays.forEach((play, index) => {
     const row = readEspnGoalPlay(play, index);
     if (!row) return;
-    const key = `${normalizeText(row.playerName)}|${row.teamCode || normalizeText(row.teamName || '')}|${readString(play?.clock?.displayValue) || index}`;
+    const key = [
+      normalizeText(row.playerName),
+      row.teamCode || normalizeText(row.teamName || '') || 'unknown',
+      readString(play?.id) || readString(play?.sequenceNumber) || readString(play?.clock?.displayValue) || readString(play?.time?.displayValue) || index,
+      normalizeText(readString(play?.text) || readString(play?.shortText) || ''),
+    ].join('|');
     if (seen.has(key)) return;
     seen.add(key);
     rows.push(row);
@@ -904,16 +1005,20 @@ async function cleanupDuplicateGoalRows(supabase: any, canonicalRows: PlayerGoal
 
 async function replacePlayerGoals(supabase: any, rows: PlayerGoalRow[]) {
   const incomingKeys = new Set(rows.map((row) => row.player_key));
-  const { data, error: selectError } = await supabase.from('player_goals').select('player_key');
+  const { data, error: selectError } = await supabase.from('player_goals').select('player_key, manual_override');
   assertNoError(selectError, 'player_goals select before ESPN replace');
 
   for (const current of data || []) {
     if (incomingKeys.has(current.player_key)) continue;
+    if (current.manual_override === true) continue;
     const { error: deleteError } = await supabase.from('player_goals').delete().eq('player_key', current.player_key);
     assertNoError(deleteError, `player_goals stale delete ${current.player_key}`);
   }
 
-  const { error } = await supabase.from('player_goals').upsert(rows, { onConflict: 'player_key' });
+  const { error } = await supabase.from('player_goals').upsert(
+    rows.map((row) => ({ ...row, source: 'sync', manual_override: false })),
+    { onConflict: 'player_key' },
+  );
   assertNoError(error, 'player_goals ESPN upsert');
 }
 
@@ -958,6 +1063,15 @@ function htmlDecode(value: string) {
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>');
+}
+
+function stripHtml(value: string) {
+  return htmlDecode(value)
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function normalizeText(value: unknown) {

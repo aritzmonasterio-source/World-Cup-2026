@@ -6,6 +6,7 @@ import type { CommunityMembership, CommunitySettings, Match, PredictionPhase, Pr
 import { displayTeam } from '../lib/flags';
 import { getCommunity, type CommunityId } from '../lib/communities';
 import { addHoursIso, fromDateTimeLocalValue, getPhaseDeadline, toDateTimeLocalValue } from '../lib/deadlines';
+import { SCORER_CANDIDATES } from '../lib/scorerCandidates';
 
 type AdminMember = CommunityMembership & { profiles?: Profile };
 type AdminNotice = { type: 'ok' | 'warning' | 'error'; text: string };
@@ -291,21 +292,28 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
   }
 
   async function saveGoals() {
-    const team = teams.find((item) => item.id === goalTeamId);
-    if (!goalPlayer.trim()) return;
+    const candidate = SCORER_CANDIDATES.find((item) => item.name === goalPlayer);
+    const team = teams.find((item) => item.code === candidate?.code) || teams.find((item) => item.id === goalTeamId);
+    if (!candidate) {
+      setAdminNotice({ type: 'error', text: 'Selecciona uno de los 25 goleadores oficiales para evitar duplicados o nombres mal escritos.' });
+      return;
+    }
     setBusy('goals');
-    const playerKey = `${goalPlayer.trim().toLowerCase()}|${goalTeamId || 'unknown'}`;
-    const { error } = await supabase.from('player_goals').upsert({
-      player_key: playerKey,
-      player_name: goalPlayer.trim(),
-      team_id: team?.id || null,
-      team_name: team?.name || null,
-      team_code: team?.code || null,
-      goals: Number(goalCount) || 0,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'player_key' });
-    if (error) alert(error.message);
-    await recalculate(false);
+    const goals = Number(goalCount) || 0;
+    const { error } = await supabase.rpc('set_player_goals_manual', {
+      player_name: candidate.name,
+      team_code: candidate.code,
+      team_name: team?.name || candidate.team,
+      goals,
+      note: 'Corrección manual desde panel admin',
+    });
+    if (error) {
+      setAdminNotice({ type: 'error', text: `No se pudieron guardar los goles de ${candidate.name}: ${error.message}` });
+      setBusy(null);
+      return;
+    }
+    setAdminNotice({ type: 'ok', text: `${candidate.name} queda con ${goals} gol(es). Ranking recalculado al momento.` });
+    await refresh();
     setBusy(null);
   }
 
@@ -524,12 +532,32 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
         <div className="dimension-card-accent p-6">
           <h2 className="text-lg font-black uppercase tracking-tighter italic mb-5">Goles de goleadores</h2>
           <div className="space-y-3">
-            <input value={goalPlayer} onChange={(event) => setGoalPlayer(event.target.value)} placeholder="Jugador" className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3" />
+            <select
+              value={goalPlayer}
+              onChange={(event) => {
+                const nextName = event.target.value;
+                const candidate = SCORER_CANDIDATES.find((item) => item.name === nextName);
+                const team = teams.find((item) => item.code === candidate?.code);
+                setGoalPlayer(nextName);
+                setGoalTeamId(team?.id || '');
+              }}
+              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm"
+            >
+              <option value="">Selecciona candidato oficial</option>
+              {SCORER_CANDIDATES.map((candidate) => (
+                <option key={`${candidate.name}-${candidate.code}`} value={candidate.name}>
+                  {candidate.name} - {candidate.team}
+                </option>
+              ))}
+            </select>
             <select value={goalTeamId} onChange={(event) => setGoalTeamId(event.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm">
               <option value="">Selección opcional</option>
               {teams.map((team) => <option key={team.id} value={team.id}>{displayTeam(team.name, team.code)}</option>)}
             </select>
             <input value={goalCount} onChange={(event) => setGoalCount(event.target.value)} type="number" min="0" placeholder="Goles" className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3" />
+            <p className="text-[10px] font-bold uppercase tracking-widest text-brand-zinc-500">
+              Esta corrección tiene prioridad sobre ESPN/FIFA y recalcula los puntos de goleador al guardar.
+            </p>
             <button onClick={saveGoals} disabled={busy === 'goals'} className="dimension-button-primary px-6 w-full">{busy === 'goals' ? 'Guardando...' : 'Guardar goles y recalcular'}</button>
           </div>
         </div>
