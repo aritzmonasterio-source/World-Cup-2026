@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Loader2, Medal, Target, Trophy } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { CheckCircle2, Loader2, Medal, RefreshCw, Target, Trophy } from 'lucide-react';
 import { motion } from 'motion/react';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { displayTeam } from '../lib/flags';
 import ConfigRequired from './ConfigRequired';
 import TeamFlag from './TeamFlag';
+
+const SCORER_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+const SCORER_SYNC_STORAGE_KEY = 'worldcup-scorer-sync-last-run';
 
 interface PlayerGoal {
   player_key: string;
@@ -41,6 +44,9 @@ export default function Live() {
   const [goals, setGoals] = useState<PlayerGoal[]>([]);
   const [events, setEvents] = useState<MatchGoalEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncNotice, setSyncNotice] = useState('');
+  const syncInFlight = useRef(false);
 
   async function loadScorers() {
     const { data: goalRows } = await supabase
@@ -62,6 +68,42 @@ export default function Live() {
     setLoading(false);
   }
 
+  async function syncScorers({ force = false, silent = false } = {}) {
+    if (!isSupabaseConfigured || syncInFlight.current) return;
+    if (!force && !shouldRunAutoSync()) return;
+
+    syncInFlight.current = true;
+    if (!silent) {
+      setSyncing(true);
+      setSyncNotice('');
+    }
+
+    try {
+      const { data, error } = await supabase.functions.invoke<{
+        ok: boolean;
+        scorers?: number;
+        scorerSource?: string;
+        scorerPointEvents?: number;
+        scorerPoints?: number;
+      }>('sync-fifa-matches');
+
+      if (error) throw error;
+      markAutoSync();
+      await loadScorers();
+      if (!silent) {
+        const scorers = data?.scorers ?? 0;
+        const points = data?.scorerPoints ?? 0;
+        setSyncNotice(`Goleadores actualizados: ${scorers} jugadores y ${points} puntos de goleador recalculados.`);
+      }
+    } catch (error) {
+      console.warn('No se pudieron sincronizar goleadores', error);
+      if (!silent) setSyncNotice('No se pudo sincronizar ahora. Prueba de nuevo en unos segundos o desde Admin.');
+    } finally {
+      syncInFlight.current = false;
+      if (!silent) setSyncing(false);
+    }
+  }
+
   useEffect(() => {
     if (!isSupabaseConfigured) {
       setLoading(false);
@@ -69,6 +111,11 @@ export default function Live() {
     }
 
     loadScorers();
+    void syncScorers({ silent: true });
+    const interval = window.setInterval(() => {
+      void syncScorers({ silent: true });
+    }, SCORER_SYNC_INTERVAL_MS);
+
     const channel = supabase
       .channel('scorers-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'player_goals' }, loadScorers)
@@ -76,6 +123,7 @@ export default function Live() {
       .subscribe();
 
     return () => {
+      window.clearInterval(interval);
       supabase.removeChannel(channel);
     };
   }, []);
@@ -99,11 +147,32 @@ export default function Live() {
             Esta vista recoge los goles reales sincronizados desde FIFA/ESPN o corregidos por el admin. Sirve como fuente para puntuar el goleador elegido.
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <StatPill label="Goles registrados" value={totalGoals} />
-          <StatPill label="Jugadores" value={goals.length} />
+        <div className="flex flex-col sm:flex-row lg:items-end gap-3">
+          <button
+            type="button"
+            onClick={() => void syncScorers({ force: true })}
+            disabled={syncing}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-brand-gold/20 bg-brand-gold/10 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-brand-gold transition hover:bg-brand-gold hover:text-black disabled:cursor-wait disabled:opacity-70"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing ? 'Actualizando' : 'Actualizar goles'}
+          </button>
+          <div className="grid grid-cols-2 gap-3">
+            <StatPill label="Goles registrados" value={totalGoals} />
+            <StatPill label="Jugadores" value={goals.length} />
+          </div>
         </div>
       </div>
+
+      {syncNotice && (
+        <div className={`rounded-2xl border px-4 py-3 text-sm font-bold ${
+          syncNotice.startsWith('No se pudo')
+            ? 'border-red-500/30 bg-red-500/10 text-red-100'
+            : 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100'
+        }`}>
+          {syncNotice}
+        </div>
+      )}
 
       {leader && (
         <section className="dimension-card-accent p-6 grid md:grid-cols-[auto_1fr_auto] gap-5 items-center">
@@ -190,6 +259,23 @@ export default function Live() {
       )}
     </div>
   );
+}
+
+function shouldRunAutoSync() {
+  try {
+    const lastRun = Number(window.localStorage.getItem(SCORER_SYNC_STORAGE_KEY) || 0);
+    return !lastRun || Date.now() - lastRun > SCORER_SYNC_INTERVAL_MS;
+  } catch {
+    return true;
+  }
+}
+
+function markAutoSync() {
+  try {
+    window.localStorage.setItem(SCORER_SYNC_STORAGE_KEY, String(Date.now()));
+  } catch {
+    // Local storage can be unavailable in strict/private browser modes.
+  }
 }
 
 function StatPill({ label, value }: { label: string; value: number }) {
