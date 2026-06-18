@@ -1,8 +1,10 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.89.0';
 
 const FIFA_URL = 'https://api.fifa.com/api/v3/calendar/matches?idCompetition=17&idSeason=285023&language=en&count=120';
-const ESPN_SCOREBOARD_URL = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260611-20260720&limit=300&region=es&lang=es';
-const ESPN_SUMMARY_URL = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/summary?region=es&lang=es&event=';
+const FBREF_SCORERS_URLS = [
+  'https://fbref.com/en/comps/1/World-Cup-Stats',
+  'https://fbref.com/en/comps/1/stats/World-Cup-Stats',
+];
 
 const TEAM_NAME_ES: Record<string, string> = {
   MEX: 'México', RSA: 'Sudáfrica', KOR: 'Corea del Sur', CZE: 'Chequia',
@@ -210,21 +212,14 @@ Deno.serve(async () => {
     const { error: cleanupGoalsError } = await supabase.rpc('cleanup_duplicate_goal_events');
     assertNoError(cleanupGoalsError, 'cleanup_duplicate_goal_events');
 
-    const { data: storedGoalEvents, error: storedGoalsError } = await supabase
-      .from('match_goal_events')
-      .select('event_key, match_id, player_name, team_id, team_name, team_code, minute, penalty, own_goal');
-    assertNoError(storedGoalsError, 'match_goal_events select');
-
-    const aggregatedGoals = mergePlayerGoalRows(aggregateGoalEvents((storedGoalEvents || []) as GoalEventRow[]));
-    const scorerSync = await fetchScorerRows(matchRows);
-    const selectedGoalRows = aggregatedGoals.length ? aggregatedGoals : scorerSync.rows;
-    const mergedGoals = mergePlayerGoalRows(selectedGoalRows);
-    fifaScorers = aggregatedGoals.length;
+    const scorerSync = await fetchScorerRows();
+    const mergedGoals = mergePlayerGoalRows(scorerSync.rows);
+    fifaScorers = 0;
     espnScorers = scorerSync.rows.length;
     scorerSyncNote = scorerSync.note;
 
     await replacePlayerGoals(supabase, mergedGoals);
-    scorerSource = aggregatedGoals.length ? 'fifa-events' : scorerSync.rows.length ? scorerSync.source : 'none';
+    scorerSource = scorerSync.rows.length ? scorerSync.source : 'none';
 
     const { error: tvError } = await supabase.rpc('recalculate_match_tv_channels');
     assertNoError(tvError, 'recalculate_match_tv_channels');
@@ -242,7 +237,7 @@ Deno.serve(async () => {
         continuation: payload.ContinuationToken ?? null,
         goal_events_seen: goalEvents.length,
         fifa_scorers: fifaScorers,
-        espn_scorers: espnScorers,
+        fbref_scorers: espnScorers,
         merged_scorers: mergedGoals.length,
         scorer_source: scorerSource,
         scorer_sync_note: scorerSyncNote,
@@ -481,305 +476,94 @@ function aggregateGoalEvents(events: GoalEventRow[]) {
   return Array.from(map.values());
 }
 
-async function fetchScorerRows(matchRows: any[]) {
-  // Scorer points must come from per-match goal events only. Aggregate scorer
-  // tables such as FBref/ESPN leaders can include duplicated, stale, or
-  // out-of-scope totals and caused inflated counts.
+async function fetchScorerRows() {
+  // Fuente única de goleadores. Los eventos embebidos de FIFA/ESPN pueden traer
+  // el mismo gol repetido en varias ramas del JSON; para puntuar, reemplazamos
+  // siempre desde una tabla agregada única.
   const errors: string[] = [];
-  const eventScorers = await fetchEspnEventScorers(errors, matchRows);
-  const eventRows = mergeExternalScorers(eventScorers.filter((row) => row.goals > 0));
-  if (eventRows.length) {
-    return {
-      source: 'espn-events',
-      rows: eventRows,
-      note: errors.length ? `Fuente única: eventos ESPN verificados por partido FIFA; avisos: ${errors.slice(0, 3).join(' | ')}` : 'Fuente única: eventos ESPN verificados por partido FIFA',
-    };
+  for (const url of FBREF_SCORERS_URLS) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'accept-language': 'es-ES,es;q=0.9,en;q=0.7',
+          referer: 'https://fbref.com/',
+          'user-agent': 'Mozilla/5.0 WorldCup2026Predictor/1.0',
+        },
+      });
+      if (!response.ok) {
+        errors.push(`${new URL(url).host}: ${response.status}`);
+        continue;
+      }
+
+      const text = await response.text();
+      const rows = mergeExternalScorers(readFbrefScorers(text)).filter((row) => row.goals > 0);
+      if (!rows.length) {
+        errors.push(`${new URL(url).host}: sin filas Goals utilizables`);
+        continue;
+      }
+
+      return {
+        source: 'fbref',
+        rows,
+        note: errors.length ? `Fuente única FBref; avisos: ${errors.slice(0, 3).join(' | ')}` : 'Fuente única FBref',
+      };
+    } catch (error) {
+      errors.push(`${new URL(url).host}: ${describeError(error)}`);
+    }
   }
 
   return {
     source: 'none',
     rows: [] as PlayerGoalRow[],
-    note: errors.length ? `Ningún evento de gol utilizable: ${errors.slice(0, 3).join(' | ')}` : 'Sin eventos de gol utilizables',
+    note: errors.length ? `FBref no devolvió una tabla Goals utilizable: ${errors.slice(0, 3).join(' | ')}` : 'FBref sin goles disponibles',
   };
 }
 
-async function fetchEspnEventScorers(errors: string[], matchRows: any[]) {
-  try {
-    const matcher = buildFifaMatchMatcher(matchRows);
-    const scoreboard = await fetchJson(ESPN_SCOREBOARD_URL);
-    const events = asArray(scoreboard?.events)
-      .filter(isEspnScorerRelevantEvent)
-      .map((event: any) => readEspnEventContext(event, matcher, errors))
-      .filter(Boolean);
+function readFbrefScorers(html: string) {
+  const scorers: ExternalScorer[] = [];
+  const tables = html.match(/<table[\s\S]*?<\/table>/gi) || [];
+  const candidateTables = tables.filter((table) =>
+    /data-stat=["']player["']/i.test(table)
+    && /data-stat=["']goals["']/i.test(table)
+    && (/stats_standard/i.test(table) || /data-stat=["']minutes["']/i.test(table) || /data-stat=["']starts["']/i.test(table))
+  );
 
-    const summaries = await mapInBatches(events, 8, async (eventContext) => {
-      try {
-        return {
-          context: eventContext,
-          summary: await fetchJson(`${ESPN_SUMMARY_URL}${eventContext.eventId}`),
-        };
-      } catch (error) {
-        errors.push(`summary ${eventContext.eventId}: ${describeError(error)}`);
-        return null;
-      }
+  candidateTables.forEach((table) => {
+    const rows = table.match(/<tr[\s\S]*?<\/tr>/gi) || [];
+    rows.forEach((row) => {
+      if (/class=["'][^"']*thead/i.test(row)) return;
+      const playerName = readFbrefCell(row, 'player');
+      const goals = numberFromValue(readFbrefCell(row, 'goals'));
+      if (!playerName || isStatLabelName(playerName) || goals <= 0) return;
+
+      const squad = readFbrefCell(row, 'team') || readFbrefCell(row, 'squad') || readFbrefCell(row, 'team_name');
+      const nationality = readFbrefCell(row, 'nationality') || readFbrefCell(row, 'nation');
+      const teamCode = normalizeTeamCode(readFbrefTeamCode(squad, nationality), squad || nationality);
+      const teamName = teamCode ? TEAM_NAME_ES[teamCode] || squad || nationality || null : squad || nationality || null;
+
+      scorers.push({
+        playerName: canonicalPlayerName(playerName),
+        teamName,
+        teamCode,
+        goals,
+        source: 'event',
+      });
     });
-
-    return summaries.flatMap((item) => {
-      if (!item) return [];
-      const rows = readEspnSummaryScorers(item.summary);
-      const parsedGoals = rows.reduce((sum, row) => sum + row.goals, 0);
-      if (item.context.expectedGoals !== null && parsedGoals > item.context.expectedGoals) {
-        errors.push(`summary ${item.context.eventId}: descartado por goles duplicados (${parsedGoals}/${item.context.expectedGoals})`);
-        return [];
-      }
-      return rows;
-    }).filter((row) => row.goals > 0);
-  } catch (error) {
-    errors.push(`scoreboard: ${describeError(error)}`);
-    return [];
-  }
-}
-
-interface FifaMatchContext {
-  key: string;
-  pairKey: string;
-  kickoffTime: number | null;
-  expectedGoals: number | null;
-}
-
-interface EspnEventContext {
-  eventId: string;
-  expectedGoals: number | null;
-}
-
-function buildFifaMatchMatcher(matchRows: any[]) {
-  const byExactKey = new Map<string, FifaMatchContext>();
-  const byPairKey = new Map<string, FifaMatchContext[]>();
-
-  matchRows.forEach((match) => {
-    const homeCode = normalizeTeamCode(readString(match.home_team_code), readString(match.home_team_name));
-    const awayCode = normalizeTeamCode(readString(match.away_team_code), readString(match.away_team_name));
-    if (!homeCode || !awayCode) return;
-
-    const dateKey = dateKeyFromValue(match.kickoff_at);
-    const pairKey = teamPairKey([homeCode, awayCode]);
-    const expectedGoals = nullableScore(match.home_score) !== null && nullableScore(match.away_score) !== null
-      ? (nullableScore(match.home_score) || 0) + (nullableScore(match.away_score) || 0)
-      : null;
-    const context: FifaMatchContext = {
-      key: `${dateKey || 'unknown-date'}|${pairKey}`,
-      pairKey,
-      kickoffTime: timeFromValue(match.kickoff_at),
-      expectedGoals,
-    };
-
-    if (dateKey) byExactKey.set(context.key, context);
-    byPairKey.set(pairKey, [...(byPairKey.get(pairKey) || []), context]);
   });
 
-  return { byExactKey, byPairKey };
+  return scorers;
 }
 
-function readEspnEventContext(
-  event: any,
-  matcher: ReturnType<typeof buildFifaMatchMatcher>,
-  errors: string[],
-): EspnEventContext | null {
-  const eventId = readString(event?.id);
-  if (!eventId) return null;
-
-  const competition = asArray(event?.competitions)[0] || {};
-  const competitors = asArray(competition?.competitors);
-  const teamCodes = competitors
-    .map((competitor: any) => {
-      const team = competitor?.team || {};
-      return normalizeTeamCode(
-        readString(team.abbreviation) || readString(team.code),
-        readString(team.displayName) || readString(team.name) || readString(team.shortDisplayName),
-      );
-    })
-    .filter(Boolean);
-  if (teamCodes.length < 2) return null;
-
-  const pairKey = teamPairKey(teamCodes as string[]);
-  const dateKey = dateKeyFromValue(event?.date || competition?.date);
-  const exactKey = `${dateKey || 'unknown-date'}|${pairKey}`;
-  const exactMatch = dateKey ? matcher.byExactKey.get(exactKey) || null : null;
-  const pairCandidates = matcher.byPairKey.get(pairKey) || [];
-  const eventTime = timeFromValue(event?.date || competition?.date);
-  const fuzzyMatch = exactMatch || findNearestMatchByTime(pairCandidates, eventTime);
-  if (!fuzzyMatch) {
-    errors.push(`scoreboard ${eventId}: partido ESPN no coincide con calendario FIFA`);
-    return null;
-  }
-
-  const espnGoals = competitors.reduce((sum: number, competitor: any) => sum + numberFromValue(competitor?.score), 0);
-  return {
-    eventId,
-    expectedGoals: espnGoals > 0 ? espnGoals : fuzzyMatch.expectedGoals,
-  };
+function readFbrefCell(row: string, dataStat: string) {
+  const pattern = new RegExp(`<(?:td|th)[^>]*data-stat=["']${dataStat}["'][^>]*>([\\s\\S]*?)<\\/(?:td|th)>`, 'i');
+  return stripHtml(row.match(pattern)?.[1] || '');
 }
 
-function findNearestMatchByTime(matches: FifaMatchContext[], eventTime: number | null) {
-  if (!matches.length) return null;
-  if (matches.length === 1) return matches[0];
-  if (!eventTime) return null;
-
-  const closest = matches
-    .map((match) => ({ match, diff: match.kickoffTime ? Math.abs(match.kickoffTime - eventTime) : Number.POSITIVE_INFINITY }))
-    .sort((a, b) => a.diff - b.diff)[0];
-
-  return closest.diff <= 36 * 60 * 60 * 1000 ? closest.match : null;
-}
-
-function teamPairKey(teamCodes: string[]) {
-  return teamCodes.slice(0, 2).map((code) => code.toUpperCase()).sort().join('-');
-}
-
-function dateKeyFromValue(value: unknown) {
-  const time = timeFromValue(value);
-  return time ? new Date(time).toISOString().slice(0, 10) : null;
-}
-
-function timeFromValue(value: unknown) {
-  const text = readString(value);
-  if (!text) return null;
-  const timestamp = Date.parse(text);
-  return Number.isFinite(timestamp) ? timestamp : null;
-}
-
-function nullableScore(value: unknown) {
-  if (value === null || value === undefined || value === '') return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-async function fetchJson(url: string) {
-  const response = await fetch(url, {
-    headers: {
-      accept: 'application/json,text/plain,*/*',
-      'accept-language': 'es-ES,es;q=0.9,en;q=0.7',
-      'user-agent': 'Mozilla/5.0 WorldCup2026Predictor/1.0',
-    },
-  });
-  if (!response.ok) throw new Error(`${new URL(url).host}: ${response.status}`);
-  return await response.json();
-}
-
-async function mapInBatches<T, R>(items: T[], batchSize: number, mapper: (item: T) => Promise<R>) {
-  const results: R[] = [];
-  for (let index = 0; index < items.length; index += batchSize) {
-    const batch = items.slice(index, index + batchSize);
-    results.push(...await Promise.all(batch.map(mapper)));
-  }
-  return results;
-}
-
-function isEspnScorerRelevantEvent(event: any) {
-  const competitions = asArray(event?.competitions);
-  const status = event?.status?.type || competitions[0]?.status?.type || {};
-  const state = normalizeText(status.state);
-  const statusText = normalizeText([status.name, status.description, status.detail, status.shortDetail].map(readString).join(' '));
-  const hasScore = competitions
-    .flatMap((competition: any) => asArray(competition?.competitors))
-    .some((competitor: any) => numberFromValue(competitor?.score) > 0);
-
-  return status.completed === true
-    || ['in', 'post'].includes(state)
-    || normalizeText(status.name) === 'statusfinal'
-    || statusText.includes('tiempocompleto')
-    || statusText.includes('final')
-    || statusText.includes('encurso')
-    || hasScore;
-}
-
-function readEspnSummaryScorers(summary: any) {
-  if (!summary || typeof summary !== 'object') return [];
-  const rows: ExternalScorer[] = [];
-  const seen = new Set<string>();
-  const playGroups = [
-    asArray(summary?.scoringPlays),
-    asArray(summary?.header?.competitions?.[0]?.details),
-    asArray(summary?.keyEvents),
-    asArray(summary?.drives).flatMap((drive) => asArray(drive?.plays)),
-    asArray(summary?.commentary).map((item) => item?.play).filter(Boolean),
-  ];
-  const plays = playGroups.find((group) => group.some((play) => readEspnGoalPlay(play, 0))) || [];
-
-  plays.forEach((play, index) => {
-    const row = readEspnGoalPlay(play, index);
-    if (!row) return;
-    const minute = readEspnPlayMinute(play);
-    const playText = readEspnPlayText(play);
-    const key = [
-      normalizeText(row.playerName),
-      row.teamCode || normalizeText(row.teamName || '') || 'unknown',
-      minute ?? normalizeText(playText) || index,
-    ].join('|');
-    if (seen.has(key)) return;
-    seen.add(key);
-    rows.push(row);
-  });
-
-  return rows;
-}
-
-function readEspnGoalPlay(play: any, index: number): ExternalScorer | null {
-  if (!play || typeof play !== 'object') return null;
-  if (play.ownGoal === true || play.own_goal === true) return null;
-
-  const typeText = [play?.type?.type, play?.type?.text, play?.type?.name, play?.shortText, play?.text].map(readString).join(' ');
-  const normalizedTypeText = normalizeText(typeText);
-  if (normalizedTypeText.includes('owngoal') || normalizedTypeText.includes('autogol') || normalizedTypeText.includes('propiapuerta')) return null;
-  const isGoal = play.scoringPlay === true
-    || normalizedTypeText.includes('goal')
-    || normalizedTypeText.includes('gol');
-  if (!isGoal) return null;
-
-  const scorer = asArray(play.participants)
-    .map((participant) => participant?.athlete)
-    .find((athlete) => readEspnName(athlete));
-  const playerName = readEspnName(scorer) || readKnownScorerFromText(typeText);
-  if (!playerName || isStatLabelName(playerName)) return null;
-
-  const teamName = readString(play?.team?.displayName) || readString(play?.team?.name) || readString(play?.team?.location) || null;
-  const rawTeamCode = readString(play?.team?.abbreviation) || readString(play?.team?.code) || null;
-  const teamCode = normalizeTeamCode(rawTeamCode, teamName);
-
-  return {
-    playerName: canonicalPlayerName(playerName),
-    teamName: teamCode ? TEAM_NAME_ES[teamCode] || teamName : teamName,
-    teamCode,
-    goals: 1,
-    source: 'event',
-  };
-}
-
-function readEspnName(value: any) {
-  return readString(value?.displayName)
-    || readString(value?.fullName)
-    || readString(value?.shortName)
-    || readString(value?.name)
-    || readString(value?.athlete?.displayName)
-    || readString(value?.player?.displayName);
-}
-
-function readEspnPlayMinute(play: any) {
-  const value = readString(play?.clock?.displayValue)
-    || readString(play?.time?.displayValue)
-    || readString(play?.displayTime)
-    || readString(play?.minute)
-    || readString(play?.time);
-  const match = value.match(/\d+/);
-  return match ? Number(match[0]) : null;
-}
-
-function readEspnPlayText(play: any) {
-  return readString(play?.text)
-    || readString(play?.shortText)
-    || readString(play?.description)
-    || readString(play?.type?.text)
-    || readString(play?.type?.name);
+function readFbrefTeamCode(squad: string | null, nationality: string | null) {
+  const combined = [squad, nationality].filter(Boolean).join(' ');
+  const explicitCode = combined.match(/\b[A-Z]{3}\b/)?.[0] || null;
+  return explicitCode;
 }
 
 function readKnownScorerFromText(value: string) {
@@ -816,7 +600,7 @@ function mergeExternalScorers(scorers: ExternalScorer[]) {
       playerName,
       teamName: scorer.teamCode ? TEAM_NAME_ES[scorer.teamCode] || scorer.teamName : scorer.teamName,
       teamCode: scorer.teamCode,
-      goals: (previous?.goals || 0) + scorer.goals,
+      goals: Math.max(previous?.goals || 0, scorer.goals),
     });
   });
 
@@ -851,12 +635,17 @@ function mergePlayerGoalRows(rows: PlayerGoalRow[]) {
 
 async function replacePlayerGoals(supabase: any, rows: PlayerGoalRow[]) {
   const incomingKeys = new Set(rows.map((row) => row.player_key));
-  const { data, error: selectError } = await supabase.from('player_goals').select('player_key, manual_override');
-  assertNoError(selectError, 'player_goals select before ESPN replace');
+  const incomingNames = new Set(rows.map((row) => normalizeText(row.player_name)));
+  const { data, error: selectError } = await supabase.from('player_goals').select('player_key, player_name');
+  assertNoError(selectError, 'player_goals select before scorer replace');
 
   for (const current of data || []) {
     if (incomingKeys.has(current.player_key)) continue;
-    if (current.manual_override === true) continue;
+    if (incomingNames.has(normalizeText(current.player_name))) {
+      const { error: deleteError } = await supabase.from('player_goals').delete().eq('player_key', current.player_key);
+      assertNoError(deleteError, `player_goals duplicated scorer delete ${current.player_key}`);
+      continue;
+    }
     const { error: deleteError } = await supabase.from('player_goals').delete().eq('player_key', current.player_key);
     assertNoError(deleteError, `player_goals stale delete ${current.player_key}`);
   }
@@ -867,7 +656,7 @@ async function replacePlayerGoals(supabase: any, rows: PlayerGoalRow[]) {
     rows.map((row) => ({ ...row, source: 'sync', manual_override: false })),
     { onConflict: 'player_key' },
   );
-  assertNoError(error, 'player_goals ESPN upsert');
+  assertNoError(error, 'player_goals scorer upsert');
 }
 
 function canonicalPlayerName(name: string) {
@@ -890,6 +679,25 @@ function numberFromValue(value: unknown) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   const match = String(value ?? '').match(/\d+/);
   return match ? Number(match[0]) : 0;
+}
+
+function htmlDecode(value: string) {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function stripHtml(value: string) {
+  return htmlDecode(value)
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function normalizeText(value: unknown) {
