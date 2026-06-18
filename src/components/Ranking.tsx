@@ -8,10 +8,12 @@ import type { CommunityId } from '../lib/communities';
 import ConfigRequired from './ConfigRequired';
 
 type RankingEntry = Omit<CommunityMembership, 'profiles'> & { profiles?: Profile | Profile[] | null };
+type PointEventDateMap = Map<string, string>;
 
 export default function Ranking({ user, profile, communityId }: { user: User | null; profile: Profile | null; communityId: CommunityId }) {
   const [rankings, setRankings] = useState<RankingEntry[]>([]);
   const [pointEvents, setPointEvents] = useState<PointEvent[]>([]);
+  const [pointEventDates, setPointEventDates] = useState<PointEventDateMap>(new Map());
   const [loading, setLoading] = useState(true);
   const [recalculating, setRecalculating] = useState(false);
   const [notice, setNotice] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
@@ -26,6 +28,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
     if (!canViewCommunityRanking) {
       setRankings([]);
       setPointEvents([]);
+      setPointEventDates(new Map());
       setLoading(false);
       return;
     }
@@ -33,7 +36,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
   }, [canViewCommunityRanking, communityId]);
 
   async function fetchRankings() {
-    const [{ data }, { data: pointRows }] = await Promise.all([
+    const [{ data }, { data: pointRows }, { data: matchRows }] = await Promise.all([
       supabase
         .from('community_memberships')
         .select('*, profiles(*)')
@@ -45,11 +48,17 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
         .from('point_events')
         .select('*')
         .eq('community_id', communityId)
-        .order('points', { ascending: false })
         .order('created_at', { ascending: false }),
+      supabase
+        .from('matches')
+        .select('id, kickoff_at, local_kickoff_at, synced_at'),
     ]);
     setRankings((data || []) as RankingEntry[]);
     setPointEvents((pointRows || []) as PointEvent[]);
+    setPointEventDates(new Map((matchRows || []).map((match) => [
+      match.id,
+      match.local_kickoff_at || match.kickoff_at || match.synced_at || '',
+    ])));
     setLoading(false);
   }
 
@@ -57,12 +66,15 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
     setRecalculating(true);
     setNotice(null);
     const { error } = await supabase.rpc('recalculate_points');
+    const { error: scorerError } = error
+      ? { error: null }
+      : await supabase.rpc('recalculate_scorer_points');
     const { count: finishedMatches } = await supabase
       .from('matches')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'finished');
-    setNotice(error
-      ? { type: 'error', text: `No se pudo recalcular: ${error.message}` }
+    setNotice(error || scorerError
+      ? { type: 'error', text: `No se pudo recalcular: ${(error || scorerError)?.message}` }
       : finishedMatches
         ? { type: 'ok', text: `Ranking recalculado con ${finishedMatches} partido(s) finalizado(s).` }
         : { type: 'ok', text: 'Ranking recalculado. Todavía no hay partidos finalizados; es normal antes del primer partido del 11 de junio de 2026.' });
@@ -143,6 +155,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
                 index={index}
                 comment={playerComments[getRankingKey(row)]}
                 events={pointEventsByUser[row.user_id] || []}
+                eventDates={pointEventDates}
               />
             ))}
           </tbody>
@@ -172,7 +185,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
               <Score label="Goles" value={row.points_scorer} />
             </div>
             <p className="mt-4 text-xs text-brand-zinc-400 italic">{playerComments[getRankingKey(row)] || fallbackPlayerComment(row, index)}</p>
-            <PointBreakdown events={pointEventsByUser[row.user_id] || []} />
+            <PointBreakdown events={pointEventsByUser[row.user_id] || []} eventDates={pointEventDates} />
           </div>
         ))}
       </div>
@@ -186,7 +199,7 @@ export default function Ranking({ user, profile, communityId }: { user: User | n
   );
 }
 
-function RankingRow({ row, index, comment, events }: { row: RankingEntry; index: number; comment: string; events: PointEvent[] }) {
+function RankingRow({ row, index, comment, events, eventDates }: { row: RankingEntry; index: number; comment: string; events: PointEvent[]; eventDates: PointEventDateMap }) {
   const rankChange = getTrend(row);
   const playerName = getPlayerName(row);
   return (
@@ -205,7 +218,7 @@ function RankingRow({ row, index, comment, events }: { row: RankingEntry; index:
           <div className="min-w-0">
             <span className="text-sm font-black uppercase tracking-tight text-white whitespace-nowrap">{playerName}</span>
             <p className="mt-1 max-w-xs text-[11px] leading-snug text-brand-zinc-500 italic normal-case">{comment || fallbackPlayerComment(row, index)}</p>
-            <PointBreakdown events={events} />
+            <PointBreakdown events={events} eventDates={eventDates} />
           </div>
         </div>
       </td>
@@ -218,8 +231,8 @@ function RankingRow({ row, index, comment, events }: { row: RankingEntry; index:
   );
 }
 
-function PointBreakdown({ events }: { events: PointEvent[] }) {
-  const sortedEvents = sortPointEvents(events);
+function PointBreakdown({ events, eventDates }: { events: PointEvent[]; eventDates: PointEventDateMap }) {
+  const sortedEvents = sortPointEvents(events, eventDates);
   const totals = getPointEventTotals(sortedEvents);
   const visibleEvents = sortedEvents.slice(0, 12);
   const hiddenCount = Math.max(sortedEvents.length - visibleEvents.length, 0);
@@ -804,18 +817,26 @@ function groupPointEventsByUser(events: PointEvent[]) {
   }, {});
 }
 
-function sortPointEvents(events: PointEvent[]) {
+function sortPointEvents(events: PointEvent[], eventDates: PointEventDateMap) {
   const categoryOrder: Record<PointEvent['category'], number> = {
     groups: 1,
     qualified: 2,
     scorer: 3,
     knockout: 4,
   };
-  return [...events].sort((a, b) =>
-    (categoryOrder[a.category] - categoryOrder[b.category]) ||
-    (toScore(b.points) - toScore(a.points)) ||
-    safeText(a.label || '', '').localeCompare(safeText(b.label || '', ''), 'es'),
-  );
+  return [...events].sort((a, b) => {
+    const dateDiff = getPointEventTimestamp(b, eventDates) - getPointEventTimestamp(a, eventDates);
+    if (dateDiff) return dateDiff;
+    return (categoryOrder[a.category] - categoryOrder[b.category])
+      || (toScore(b.points) - toScore(a.points))
+      || safeText(a.label || '', '').localeCompare(safeText(b.label || '', ''), 'es');
+  });
+}
+
+function getPointEventTimestamp(event: PointEvent, eventDates: PointEventDateMap) {
+  const eventDate = event.ref_type === 'match' ? eventDates.get(event.ref_id) : event.created_at;
+  const timestamp = Date.parse(eventDate || '');
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function getPointEventTotals(events: PointEvent[]) {

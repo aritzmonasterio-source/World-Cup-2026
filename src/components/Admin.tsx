@@ -230,9 +230,12 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
       syncedMatches = data?.matches;
     }
     const { error } = await supabase.rpc('recalculate_points');
+    const { error: scorerError } = error
+      ? { error: null }
+      : await supabase.rpc('recalculate_scorer_points');
     const summary = await loadResultSummary();
-    setAdminNotice(error
-      ? { type: 'error', text: `Error al calcular puntos: ${error.message}` }
+    setAdminNotice(error || scorerError
+      ? { type: 'error', text: `Error al calcular puntos: ${(error || scorerError)?.message}` }
       : syncError
         ? { type: 'warning', text: `Puntos recalculados con los datos ya guardados, pero la sincronización externa no respondió ahora mismo: ${syncError}` }
         : buildRecalculateNotice('Puntos recalculados correctamente', summary, syncedMatches));

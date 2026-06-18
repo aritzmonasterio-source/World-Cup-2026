@@ -214,9 +214,12 @@ Deno.serve(async () => {
       assertNoError(eventsError, 'match_goal_events upsert');
     }
 
+    const { error: cleanupGoalsError } = await supabase.rpc('cleanup_duplicate_goal_events');
+    assertNoError(cleanupGoalsError, 'cleanup_duplicate_goal_events');
+
     const { data: storedGoalEvents, error: storedGoalsError } = await supabase
       .from('match_goal_events')
-      .select('player_name, team_id, team_name, team_code, own_goal');
+      .select('event_key, match_id, player_name, team_id, team_name, team_code, minute, penalty, own_goal');
     assertNoError(storedGoalsError, 'match_goal_events select');
 
     const aggregatedGoals = aggregateGoalEvents((storedGoalEvents || []) as GoalEventRow[]);
@@ -235,6 +238,8 @@ Deno.serve(async () => {
     assertNoError(tvError, 'recalculate_match_tv_channels');
     const { error: pointsError } = await supabase.rpc('recalculate_points');
     assertNoError(pointsError, 'recalculate_points');
+    const { error: scorerPointsError } = await supabase.rpc('recalculate_scorer_points');
+    assertNoError(scorerPointsError, 'recalculate_scorer_points');
     const scorerPointSummary = await loadScorerPointSummary(supabase);
     const { error: updateSyncRunError } = await supabase.from('sync_runs').update({
       ok: true,
@@ -454,10 +459,21 @@ function extractGoalEvents(match: any, matchId: string, home: NormalizedTeam, aw
 
 function aggregateGoalEvents(events: GoalEventRow[]) {
   const map = new Map<string, PlayerGoalRow>();
+  const seen = new Set<string>();
 
   events.filter((event) => !event.own_goal).forEach((event) => {
     const playerName = canonicalPlayerName(event.player_name);
     const playerKey = goalPlayerKey(playerName, event.team_code, event.team_id);
+    const eventIdentity = [
+      normalizeText(playerName),
+      event.team_code || event.team_id || normalizeText(event.team_name),
+      event.match_id || 'unknown-match',
+      event.minute ?? 'unknown-minute',
+      event.penalty ? 'penalty' : 'open',
+    ].join('|');
+    if (seen.has(eventIdentity)) return;
+    seen.add(eventIdentity);
+
     const previous = map.get(playerKey);
     map.set(playerKey, {
       player_key: playerKey,
