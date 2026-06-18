@@ -1,10 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.89.0';
 
 const FIFA_URL = 'https://api.fifa.com/api/v3/calendar/matches?idCompetition=17&idSeason=285023&language=en&count=120';
-const FBREF_SCORERS_URLS = [
-  'https://fbref.com/en/comps/1/World-Cup-Stats',
-  'https://fbref.com/en/comps/1/stats/World-Cup-Stats',
-];
 
 const TEAM_NAME_ES: Record<string, string> = {
   MEX: 'México', RSA: 'Sudáfrica', KOR: 'Corea del Sur', CZE: 'Chequia',
@@ -198,9 +194,14 @@ Deno.serve(async () => {
     assertNoError(matchesError, 'matches upsert');
 
     let fifaScorers = 0;
-    let espnScorers = 0;
     let scorerSource = 'none';
     let scorerSyncNote: string | null = null;
+
+    const { error: deleteOldEventsError } = await supabase
+      .from('match_goal_events')
+      .delete()
+      .neq('event_key', '__never__');
+    assertNoError(deleteOldEventsError, 'match_goal_events full refresh delete');
 
     if (goalEvents.length) {
       const { error: eventsError } = await supabase
@@ -212,14 +213,19 @@ Deno.serve(async () => {
     const { error: cleanupGoalsError } = await supabase.rpc('cleanup_duplicate_goal_events');
     assertNoError(cleanupGoalsError, 'cleanup_duplicate_goal_events');
 
-    const scorerSync = await fetchScorerRows();
-    const mergedGoals = mergePlayerGoalRows(scorerSync.rows);
-    fifaScorers = 0;
-    espnScorers = scorerSync.rows.length;
-    scorerSyncNote = scorerSync.note;
+    const { data: storedGoalEvents, error: storedGoalsError } = await supabase
+      .from('match_goal_events')
+      .select('event_key, match_id, player_name, team_id, team_name, team_code, minute, penalty, own_goal');
+    assertNoError(storedGoalsError, 'match_goal_events select');
+
+    const mergedGoals = mergePlayerGoalRows(aggregateGoalEvents((storedGoalEvents || []) as GoalEventRow[]));
+    fifaScorers = mergedGoals.length;
+    scorerSyncNote = goalEvents.length
+      ? 'Fuente única: eventos FIFA por partido validados contra marcador'
+      : 'FIFA no ha publicado eventos de gol utilizables';
 
     await replacePlayerGoals(supabase, mergedGoals);
-    scorerSource = scorerSync.rows.length ? scorerSync.source : 'none';
+    scorerSource = mergedGoals.length ? 'fifa-events' : 'none';
 
     const { error: tvError } = await supabase.rpc('recalculate_match_tv_channels');
     assertNoError(tvError, 'recalculate_match_tv_channels');
@@ -237,7 +243,6 @@ Deno.serve(async () => {
         continuation: payload.ContinuationToken ?? null,
         goal_events_seen: goalEvents.length,
         fifa_scorers: fifaScorers,
-        fbref_scorers: espnScorers,
         merged_scorers: mergedGoals.length,
         scorer_source: scorerSource,
         scorer_sync_note: scorerSyncNote,
@@ -307,14 +312,6 @@ interface PlayerGoalRow {
   team_code: string | null;
   goals: number;
   updated_at: string;
-}
-
-interface ExternalScorer {
-  playerName: string;
-  teamName: string | null;
-  teamCode: string | null;
-  goals: number;
-  source?: 'event';
 }
 
 function normalizeTeam(team: any) {
@@ -392,56 +389,99 @@ function inferTvChannel(matchNumber: number | null, roundNumber: number | null, 
 }
 
 function extractGoalEvents(match: any, matchId: string, home: NormalizedTeam, away: NormalizedTeam, matchNumber: number | null): GoalEventRow[] {
-  const rows: GoalEventRow[] = [];
-  const seen = new Set<string>();
   const now = new Date().toISOString();
 
-  const pushGoal = (raw: any, source: string, index: number, side?: 'home' | 'away') => {
-    if (!raw || typeof raw !== 'object') return;
-    if (!isGoalSignal(raw, source)) return;
+  const readGoals = (items: unknown[], source: string, side?: 'home' | 'away') => {
+    const rows: GoalEventRow[] = [];
+    const seen = new Set<string>();
 
-    const playerName = readPlayerName(raw);
-    if (!playerName) return;
+    items.forEach((item, index) => {
+      if (!item || typeof item !== 'object') return;
+      const raw = item as any;
+      if (!isGoalSignal(raw, source)) return;
 
-    const team = resolveGoalTeam(raw, side, home, away);
-    const minute = readMinute(raw);
-    const penalty = readBooleanish(raw.Penalty) || readBooleanish(raw.IsPenalty) || includesAny(readTextBlob(raw), ['penalty', 'penalti']);
-    const ownGoal = readBooleanish(raw.OwnGoal) || readBooleanish(raw.IsOwnGoal) || includesAny(readTextBlob(raw), ['own goal', 'autogol']);
-    const eventKey = String(raw.IdEvent || raw.EventId || raw.IdMatchEvent || raw.IdGoal || `${matchId}:${playerName}:${minute ?? index}:${team?.id || team?.code || 'unknown'}`);
+      const playerName = readPlayerName(raw);
+      if (!playerName) return;
 
-    if (seen.has(eventKey)) return;
-    seen.add(eventKey);
+      const team = resolveGoalTeam(raw, side, home, away);
+      const minute = readMinute(raw);
+      const penalty = readBooleanish(raw.Penalty) || readBooleanish(raw.IsPenalty) || includesAny(readTextBlob(raw), ['penalty', 'penalti']);
+      const ownGoal = readBooleanish(raw.OwnGoal) || readBooleanish(raw.IsOwnGoal) || includesAny(readTextBlob(raw), ['own goal', 'autogol']);
+      const eventKey = [
+        matchId,
+        normalizeText(playerName),
+        team?.code || team?.id || 'unknown',
+        minute ?? index,
+        penalty ? 'penalty' : 'open',
+        ownGoal ? 'own' : 'regular',
+      ].join(':');
 
-    rows.push({
-      event_key: eventKey,
-      match_id: matchId,
-      match_number: matchNumber,
-      player_name: playerName,
-      team_id: team?.id || null,
-      team_name: team?.name || null,
-      team_code: team?.code || null,
-      minute,
-      penalty,
-      own_goal: ownGoal,
-      raw,
-      updated_at: now,
+      if (seen.has(eventKey)) return;
+      seen.add(eventKey);
+
+      rows.push({
+        event_key: eventKey,
+        match_id: matchId,
+        match_number: matchNumber,
+        player_name: playerName,
+        team_id: team?.id || null,
+        team_name: team?.name || null,
+        team_code: team?.code || null,
+        minute,
+        penalty,
+        own_goal: ownGoal,
+        raw,
+        updated_at: now,
+      });
     });
+
+    return rows;
   };
 
-  [
-    { source: 'home-goals', side: 'home' as const, values: [match.Home?.Goals, match.Home?.GoalEvents, match.HomeGoals, match.HomeTeamGoals] },
-    { source: 'away-goals', side: 'away' as const, values: [match.Away?.Goals, match.Away?.GoalEvents, match.AwayGoals, match.AwayTeamGoals] },
-  ].forEach((source) => {
-    source.values.flatMap(asArray).forEach((goal, index) => pushGoal(goal, source.source, index, source.side));
-  });
+  const expectedHome = nullableNumber(match.HomeTeamScore);
+  const expectedAway = nullableNumber(match.AwayTeamScore);
+  const expectedTotal = expectedHome !== null && expectedAway !== null ? expectedHome + expectedAway : null;
+  const explicitRows = [
+    ...readGoals([match.Home?.Goals, match.Home?.GoalEvents, match.HomeGoals, match.HomeTeamGoals].flatMap(asArray), 'home-goals', 'home'),
+    ...readGoals([match.Away?.Goals, match.Away?.GoalEvents, match.AwayGoals, match.AwayTeamGoals].flatMap(asArray), 'away-goals', 'away'),
+  ];
 
-  [match.MatchEvents, match.Events, match.Incidents, match.MatchIncidents, match.Timeline, match.MatchFacts]
-    .flatMap(asArray)
-    .forEach((event, index) => pushGoal(event, 'match-events', index));
+  if (isPlausibleGoalSet(explicitRows, expectedTotal, expectedHome, expectedAway, home, away)) return explicitRows;
 
-  collectGoalArrays(match).forEach((goal, index) => pushGoal(goal, 'goal-array', index));
+  const eventCollections = [
+    match.MatchEvents,
+    match.Events,
+    match.Incidents,
+    match.MatchIncidents,
+    match.Timeline,
+    match.MatchFacts,
+  ];
 
-  return rows;
+  for (const collection of eventCollections) {
+    const rows = readGoals(asArray(collection), 'match-events');
+    if (isPlausibleGoalSet(rows, expectedTotal, expectedHome, expectedAway, home, away)) return rows;
+  }
+
+  return [];
+}
+
+function isPlausibleGoalSet(
+  rows: GoalEventRow[],
+  expectedTotal: number | null,
+  expectedHome: number | null,
+  expectedAway: number | null,
+  home: NormalizedTeam,
+  away: NormalizedTeam,
+) {
+  if (!rows.length) return false;
+  if (expectedTotal !== null && rows.length > expectedTotal) return false;
+
+  const homeGoals = rows.filter((row) => row.team_id === home?.id || row.team_code === home?.code).length;
+  const awayGoals = rows.filter((row) => row.team_id === away?.id || row.team_code === away?.code).length;
+  if (expectedHome !== null && homeGoals > expectedHome) return false;
+  if (expectedAway !== null && awayGoals > expectedAway) return false;
+
+  return true;
 }
 
 function aggregateGoalEvents(events: GoalEventRow[]) {
@@ -474,145 +514,6 @@ function aggregateGoalEvents(events: GoalEventRow[]) {
   });
 
   return Array.from(map.values());
-}
-
-async function fetchScorerRows() {
-  // Fuente única de goleadores. Los eventos embebidos de FIFA/ESPN pueden traer
-  // el mismo gol repetido en varias ramas del JSON; para puntuar, reemplazamos
-  // siempre desde una tabla agregada única.
-  const errors: string[] = [];
-  for (const url of FBREF_SCORERS_URLS) {
-    try {
-      const response = await fetch(url, {
-        headers: {
-          accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'accept-language': 'es-ES,es;q=0.9,en;q=0.7',
-          referer: 'https://fbref.com/',
-          'user-agent': 'Mozilla/5.0 WorldCup2026Predictor/1.0',
-        },
-      });
-      if (!response.ok) {
-        errors.push(`${new URL(url).host}: ${response.status}`);
-        continue;
-      }
-
-      const text = await response.text();
-      const rows = mergeExternalScorers(readFbrefScorers(text)).filter((row) => row.goals > 0);
-      if (!rows.length) {
-        errors.push(`${new URL(url).host}: sin filas Goals utilizables`);
-        continue;
-      }
-
-      return {
-        source: 'fbref',
-        rows,
-        note: errors.length ? `Fuente única FBref; avisos: ${errors.slice(0, 3).join(' | ')}` : 'Fuente única FBref',
-      };
-    } catch (error) {
-      errors.push(`${new URL(url).host}: ${describeError(error)}`);
-    }
-  }
-
-  return {
-    source: 'none',
-    rows: [] as PlayerGoalRow[],
-    note: errors.length ? `FBref no devolvió una tabla Goals utilizable: ${errors.slice(0, 3).join(' | ')}` : 'FBref sin goles disponibles',
-  };
-}
-
-function readFbrefScorers(html: string) {
-  const scorers: ExternalScorer[] = [];
-  const tables = html.match(/<table[\s\S]*?<\/table>/gi) || [];
-  const candidateTables = tables.filter((table) =>
-    /data-stat=["']player["']/i.test(table)
-    && /data-stat=["']goals["']/i.test(table)
-    && (/stats_standard/i.test(table) || /data-stat=["']minutes["']/i.test(table) || /data-stat=["']starts["']/i.test(table))
-  );
-
-  candidateTables.forEach((table) => {
-    const rows = table.match(/<tr[\s\S]*?<\/tr>/gi) || [];
-    rows.forEach((row) => {
-      if (/class=["'][^"']*thead/i.test(row)) return;
-      const playerName = readFbrefCell(row, 'player');
-      const goals = numberFromValue(readFbrefCell(row, 'goals'));
-      if (!playerName || isStatLabelName(playerName) || goals <= 0) return;
-
-      const squad = readFbrefCell(row, 'team') || readFbrefCell(row, 'squad') || readFbrefCell(row, 'team_name');
-      const nationality = readFbrefCell(row, 'nationality') || readFbrefCell(row, 'nation');
-      const teamCode = normalizeTeamCode(readFbrefTeamCode(squad, nationality), squad || nationality);
-      const teamName = teamCode ? TEAM_NAME_ES[teamCode] || squad || nationality || null : squad || nationality || null;
-
-      scorers.push({
-        playerName: canonicalPlayerName(playerName),
-        teamName,
-        teamCode,
-        goals,
-        source: 'event',
-      });
-    });
-  });
-
-  return scorers;
-}
-
-function readFbrefCell(row: string, dataStat: string) {
-  const pattern = new RegExp(`<(?:td|th)[^>]*data-stat=["']${dataStat}["'][^>]*>([\\s\\S]*?)<\\/(?:td|th)>`, 'i');
-  return stripHtml(row.match(pattern)?.[1] || '');
-}
-
-function readFbrefTeamCode(squad: string | null, nationality: string | null) {
-  const combined = [squad, nationality].filter(Boolean).join(' ');
-  const explicitCode = combined.match(/\b[A-Z]{3}\b/)?.[0] || null;
-  return explicitCode;
-}
-
-function readKnownScorerFromText(value: string) {
-  const normalized = normalizeText(value);
-  if (!normalized) return null;
-  const aliases = Object.entries(CANONICAL_SCORER_NAMES).sort((a, b) => b[0].length - a[0].length);
-  return aliases.find(([alias]) => alias.length > 2 && normalized.includes(alias))?.[1] || null;
-}
-
-function isStatLabelName(value: string) {
-  return [
-    'asistencias',
-    'goles',
-    'goals',
-    'totaldegoles',
-    'tiros',
-    'faltas',
-    'tarjetas',
-  ].includes(normalizeText(value));
-}
-
-function mergeExternalScorers(scorers: ExternalScorer[]) {
-  const map = new Map<string, {
-    playerName: string;
-    teamName: string | null;
-    teamCode: string | null;
-    goals: number;
-  }>();
-  scorers.forEach((scorer) => {
-    const playerName = canonicalPlayerName(scorer.playerName);
-    const playerKey = goalPlayerKey(playerName, scorer.teamCode, null);
-    const previous = map.get(playerKey);
-    map.set(playerKey, {
-      playerName,
-      teamName: scorer.teamCode ? TEAM_NAME_ES[scorer.teamCode] || scorer.teamName : scorer.teamName,
-      teamCode: scorer.teamCode,
-      goals: Math.max(previous?.goals || 0, scorer.goals),
-    });
-  });
-
-  return Array.from(map.entries()).map(([playerKey, scorer]) => ({
-    player_key: playerKey,
-    player_name: scorer.playerName,
-    team_id: null,
-    team_name: scorer.teamName,
-    team_code: scorer.teamCode,
-    goals: scorer.goals,
-    updated_at: new Date().toISOString(),
-  })).sort((a, b) => b.goals - a.goals || a.player_name.localeCompare(b.player_name));
 }
 
 function mergePlayerGoalRows(rows: PlayerGoalRow[]) {
@@ -675,31 +576,6 @@ function normalizeTeamCode(code: string | null, name: string | null) {
   return TEAM_CODE_BY_NAME[normalizeText(name)] || upperCode || null;
 }
 
-function numberFromValue(value: unknown) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  const match = String(value ?? '').match(/\d+/);
-  return match ? Number(match[0]) : 0;
-}
-
-function htmlDecode(value: string) {
-  return value
-    .replace(/&quot;/g, '"')
-    .replace(/&#x27;/g, "'")
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
-}
-
-function stripHtml(value: string) {
-  return htmlDecode(value)
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 function normalizeText(value: unknown) {
   return String(value ?? '')
     .normalize('NFD')
@@ -711,25 +587,6 @@ function normalizeText(value: unknown) {
 function asArray(value: unknown): any[] {
   if (!value) return [];
   return Array.isArray(value) ? value : [value];
-}
-
-function collectGoalArrays(root: any) {
-  const goals: any[] = [];
-
-  const walk = (value: any, keyPath: string[], depth: number) => {
-    if (!value || depth > 5) return;
-    if (Array.isArray(value)) {
-      const key = keyPath[keyPath.length - 1]?.toLowerCase() || '';
-      if (key.includes('goal')) goals.push(...value.filter((item) => item && typeof item === 'object'));
-      value.forEach((item) => walk(item, keyPath, depth + 1));
-      return;
-    }
-    if (typeof value !== 'object') return;
-    Object.entries(value).forEach(([key, child]) => walk(child, [...keyPath, key], depth + 1));
-  };
-
-  walk(root, [], 0);
-  return goals;
 }
 
 function resolveGoalTeam(raw: any, side: 'home' | 'away' | undefined, home: NormalizedTeam, away: NormalizedTeam) {
