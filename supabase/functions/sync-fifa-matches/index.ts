@@ -224,7 +224,11 @@ Deno.serve(async () => {
 
     const aggregatedGoals = aggregateGoalEvents((storedGoalEvents || []) as GoalEventRow[]);
     const espnSync = await fetchEspnScorerRows();
-    const mergedGoals = mergePlayerGoalRows([...aggregatedGoals, ...espnSync.rows]);
+    const espnKeys = new Set(espnSync.rows.map((row) => playerGoalRowKey(row)));
+    const mergedGoals = mergePlayerGoalRows([
+      ...espnSync.rows,
+      ...aggregatedGoals.filter((row) => !espnKeys.has(playerGoalRowKey(row))),
+    ]);
     fifaScorers = aggregatedGoals.length;
     espnScorers = espnSync.rows.length;
     scorerSyncNote = espnSync.note;
@@ -847,7 +851,7 @@ function mergeExternalScorers(scorers: ExternalScorer[]) {
     team_id: null,
     team_name: scorer.teamName,
     team_code: scorer.teamCode,
-    goals: Math.max(scorer.statGoals, scorer.eventGoals),
+    goals: scorer.statGoals || scorer.eventGoals,
     updated_at: new Date().toISOString(),
   })).sort((a, b) => b.goals - a.goals || a.player_name.localeCompare(b.player_name));
 }
@@ -868,6 +872,10 @@ function mergePlayerGoalRows(rows: PlayerGoalRow[]) {
     });
   });
   return Array.from(map.values()).sort((a, b) => b.goals - a.goals || a.player_name.localeCompare(b.player_name));
+}
+
+function playerGoalRowKey(row: Pick<PlayerGoalRow, 'player_name' | 'team_code' | 'team_id'>) {
+  return goalPlayerKey(canonicalPlayerName(row.player_name), row.team_code, row.team_id);
 }
 
 function dedupeExternalScorers(scorers: ExternalScorer[]) {
