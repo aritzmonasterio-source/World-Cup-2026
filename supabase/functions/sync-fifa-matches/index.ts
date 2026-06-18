@@ -234,10 +234,8 @@ Deno.serve(async () => {
     espnScorers = scorerSync.rows.length;
     scorerSyncNote = scorerSync.note;
 
-    if (mergedGoals.length) {
-      await replacePlayerGoals(supabase, mergedGoals);
-      scorerSource = scorerSync.rows.length ? scorerSync.source : 'fifa-events';
-    }
+    await replacePlayerGoals(supabase, mergedGoals);
+    scorerSource = scorerSync.rows.length ? scorerSync.source : fifaScorers ? 'fifa-events' : 'none';
 
     const { error: tvError } = await supabase.rpc('recalculate_match_tv_channels');
     assertNoError(tvError, 'recalculate_match_tv_channels');
@@ -505,63 +503,24 @@ async function syncEspnScorers(supabase: any) {
 }
 
 async function fetchScorerRows() {
+  // Scorer points must come from per-match goal events only. Aggregate scorer
+  // tables such as FBref/ESPN leaders can include duplicated, stale, or
+  // out-of-scope totals and caused inflated counts.
   const errors: string[] = [];
-  const fbref = await fetchFbrefScorerRows(errors);
-  const fbrefRows = fbref.rows;
-  if (fbrefRows.length) {
-    return {
-      source: 'fbref',
-      rows: fbrefRows,
-      note: fbref.note,
-    };
-  }
-
-  for (const url of ESPN_SCORERS_URLS) {
-    try {
-      const response = await fetch(url, {
-        headers: {
-          accept: 'application/json,text/plain,*/*',
-          'accept-language': 'es-ES,es;q=0.9,en;q=0.7',
-          'user-agent': 'Mozilla/5.0 WorldCup2026Predictor/1.0',
-        },
-      });
-      if (!response.ok) {
-        errors.push(`${new URL(url).host}: ${response.status}`);
-        continue;
-      }
-
-      const text = await response.text();
-      const payloads = parsePossibleJsonPayloads(text);
-      const statRows = mergeExternalScorers(payloads.flatMap(readEspnScorers).filter((row) => row.goals > 0));
-      if (!statRows.length) {
-        errors.push(`${new URL(url).host}: sin goleadores en payload`);
-        continue;
-      }
-
-      return {
-        source: 'espn-stats',
-        rows: statRows,
-        note: fbref.note,
-      };
-    } catch (error) {
-      errors.push(`${new URL(url).host}: ${describeError(error)}`);
-    }
-  }
-
   const eventScorers = await fetchEspnEventScorers(errors);
   const eventRows = mergeExternalScorers(eventScorers.filter((row) => row.goals > 0));
   if (eventRows.length) {
     return {
       source: 'espn-events',
       rows: eventRows,
-      note: errors.length ? `FBref/ESPN stats no respondieron; se usaron eventos ESPN: ${errors.slice(0, 3).join(' | ')}` : fbref.note,
+      note: errors.length ? `Se usaron solo eventos ESPN por partido; avisos: ${errors.slice(0, 3).join(' | ')}` : 'Fuente única: eventos ESPN por partido',
     };
   }
 
   return {
     source: 'none',
     rows: [] as PlayerGoalRow[],
-    note: errors.length ? `Ninguna fuente externa devolvió goleadores utilizables: ${errors.slice(0, 3).join(' | ')}` : 'Sin datos utilizables',
+    note: errors.length ? `Ningún evento de gol utilizable: ${errors.slice(0, 3).join(' | ')}` : 'Sin eventos de gol utilizables',
   };
 }
 
@@ -720,13 +679,14 @@ function readEspnSummaryScorers(summary: any) {
   if (!summary || typeof summary !== 'object') return [];
   const rows: ExternalScorer[] = [];
   const seen = new Set<string>();
-  const plays = [
-    ...asArray(summary?.header?.competitions?.[0]?.details),
-    ...asArray(summary?.scoringPlays),
-    ...asArray(summary?.drives).flatMap((drive) => asArray(drive?.plays)),
-    ...asArray(summary?.keyEvents),
-    ...asArray(summary?.commentary).map((item) => item?.play).filter(Boolean),
+  const playGroups = [
+    asArray(summary?.scoringPlays),
+    asArray(summary?.header?.competitions?.[0]?.details),
+    asArray(summary?.keyEvents),
+    asArray(summary?.drives).flatMap((drive) => asArray(drive?.plays)),
+    asArray(summary?.commentary).map((item) => item?.play).filter(Boolean),
   ];
+  const plays = playGroups.find((group) => group.some((play) => readEspnGoalPlay(play, 0))) || [];
 
   plays.forEach((play, index) => {
     const row = readEspnGoalPlay(play, index);
@@ -1014,6 +974,8 @@ async function replacePlayerGoals(supabase: any, rows: PlayerGoalRow[]) {
     const { error: deleteError } = await supabase.from('player_goals').delete().eq('player_key', current.player_key);
     assertNoError(deleteError, `player_goals stale delete ${current.player_key}`);
   }
+
+  if (!rows.length) return;
 
   const { error } = await supabase.from('player_goals').upsert(
     rows.map((row) => ({ ...row, source: 'sync', manual_override: false })),
