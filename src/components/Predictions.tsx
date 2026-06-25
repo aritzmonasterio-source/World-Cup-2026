@@ -100,6 +100,23 @@ function normalizePlayerName(value?: string | null) {
     .toLowerCase();
 }
 
+function normalizeStageText(value?: string | null) {
+  return (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function isRoundOf32Fixture(match: Match) {
+  const stageText = normalizeStageText(`${match.phase || ''} ${match.stage_name || ''}`);
+  return (
+    (match.round_number || 0) === 4 ||
+    stageText.includes('dieciseis') ||
+    stageText.includes('round of 32') ||
+    stageText.includes('ronda de 32')
+  );
+}
+
 export default function Predictions({
   user,
   profile,
@@ -251,10 +268,28 @@ export default function Predictions({
     return grouped;
   }, [activeFilter, matches]);
 
-  const selectableTeams = useMemo(
-    () => [...teams].sort((a, b) => displayTeam(a.name, a.code).localeCompare(displayTeam(b.name, b.code), 'es')),
-    [teams],
-  );
+  const knockoutQualifiedTeams = useMemo(() => {
+    const teamById = new Map(teams.map((team) => [team.id, team]));
+    const realQualified = new Map<string, Team>();
+
+    matches.filter(isRoundOf32Fixture).forEach((match) => {
+      [
+        { id: match.home_team_id, name: match.home_team_name, code: match.home_team_code },
+        { id: match.away_team_id, name: match.away_team_name, code: match.away_team_code },
+      ].forEach((team) => {
+        if (!team.id) return;
+        realQualified.set(team.id, teamById.get(team.id) || {
+          id: team.id,
+          name: team.name || 'Por definir',
+          code: team.code || '',
+          group_code: null,
+          flag_url: null,
+        });
+      });
+    });
+
+    return [...realQualified.values()].sort((a, b) => displayTeam(a.name, a.code).localeCompare(displayTeam(b.name, b.code), 'es'));
+  }, [matches, teams]);
 
   const groupMatches = useMemo(
     () => matches.filter((match) => !isKnockoutFixture(match) && match.group_code),
@@ -381,7 +416,7 @@ export default function Predictions({
   );
 
   const updateKnockoutPick = (matchId: string, side: 'home' | 'away', teamId: string) => {
-    const team = teams.find((item) => item.id === teamId);
+    const team = knockoutQualifiedTeams.find((item) => item.id === teamId) || teams.find((item) => item.id === teamId);
     const match = matches.find((item) => item.id === matchId);
     const updatedAt = new Date().toISOString();
     const nextPick = {
@@ -397,7 +432,16 @@ export default function Predictions({
       [matchId]: nextPick,
     }));
     persistDraft({ knockoutPredictions: { [matchId]: nextPick } });
-    if (match && nextPick.predicted_home_team_id && nextPick.predicted_away_team_id && nextPick.predicted_home_team_id !== nextPick.predicted_away_team_id) {
+    if (
+      match &&
+      nextPick.predicted_home_team_id &&
+      nextPick.predicted_away_team_id &&
+      nextPick.predicted_home_team_id !== nextPick.predicted_away_team_id &&
+      nextPick.predicted_home_score !== undefined &&
+      nextPick.predicted_home_score !== null &&
+      nextPick.predicted_away_score !== undefined &&
+      nextPick.predicted_away_score !== null
+    ) {
       scheduleAutoSave(`ko-${matchId}`, () => saveKnockoutPrediction(match, nextPick));
     }
   };
@@ -418,7 +462,15 @@ export default function Predictions({
       [matchId]: nextPick,
     }));
     persistDraft({ knockoutPredictions: { [matchId]: nextPick } });
-    if (nextPick.predicted_home_team_id && nextPick.predicted_away_team_id && nextPick.predicted_home_team_id !== nextPick.predicted_away_team_id) {
+    if (
+      nextPick.predicted_home_team_id &&
+      nextPick.predicted_away_team_id &&
+      nextPick.predicted_home_team_id !== nextPick.predicted_away_team_id &&
+      nextPick.predicted_home_score !== undefined &&
+      nextPick.predicted_home_score !== null &&
+      nextPick.predicted_away_score !== undefined &&
+      nextPick.predicted_away_score !== null
+    ) {
       scheduleAutoSave(`ko-${matchId}`, () => saveKnockoutPrediction(match, nextPick));
     }
   };
@@ -428,6 +480,12 @@ export default function Predictions({
     if (!canEdit || isDeadlineClosed(knockoutDeadlineIso)) return;
     const pred = getKnockoutPredictionBase(match, override || knockoutPredictions[match.id]);
     if (!pred?.predicted_home_team_id || !pred?.predicted_away_team_id || pred.predicted_home_team_id === pred.predicted_away_team_id) return;
+    if (
+      pred.predicted_home_score === undefined ||
+      pred.predicted_home_score === null ||
+      pred.predicted_away_score === undefined ||
+      pred.predicted_away_score === null
+    ) return;
 
     setSavingId(`ko-${match.id}`);
     const updatedAt = pred.updated_at || new Date().toISOString();
@@ -453,7 +511,7 @@ export default function Predictions({
   };
 
   const updateFinalistPick = (slot: FinalistSlot, teamId: string) => {
-    const team = teams.find((item) => item.id === teamId);
+    const team = knockoutQualifiedTeams.find((item) => item.id === teamId) || teams.find((item) => item.id === teamId);
     const updatedAt = new Date().toISOString();
     const nextPick = {
       ...finalistPrediction,
@@ -741,7 +799,7 @@ export default function Predictions({
       {activeFilter !== 'scorers' && <section className="space-y-6">
         {activeFilter === 'knockout' && (
           <FinalistsPanel
-            teams={selectableTeams}
+            teams={knockoutQualifiedTeams}
             pick={finalistPrediction}
             locked={!canEdit || isDeadlineClosed(knockoutDeadlineIso)}
             saving={savingId === 'finalists'}
@@ -752,7 +810,7 @@ export default function Predictions({
 
         {activeFilter === 'knockout' && (
           <div className="rounded-2xl border border-brand-gold/20 bg-brand-gold/5 p-5 text-sm text-brand-zinc-300">
-            <span className="font-black uppercase tracking-widest text-brand-gold">Eliminatorias:</span> elige los equipos y el marcador de cada cruce, desde dieciseisavos hasta la final. Puntúa el marcador solo si el enfrentamiento previsto coincide con el cruce real. Cierre: {formatDateTime(knockoutDeadlineIso)}.
+            <span className="font-black uppercase tracking-widest text-brand-gold">Eliminatorias:</span> en dieciseisavos el cruce real está bloqueado y solo pronosticas marcador. Desde octavos eliges selecciones entre los clasificados reales y también el marcador. Puntúa el marcador solo si el enfrentamiento previsto coincide con el cruce real. Cierre: {formatDateTime(knockoutDeadlineIso)}.
           </div>
         )}
 
@@ -772,6 +830,7 @@ export default function Predictions({
                   const matchPointEvents = getMatchPointEvents(match.id);
 
                   if (isKnockout) {
+                    const teamsLocked = isRoundOf32Fixture(match);
                     return (
                       <motion.div
                         key={match.id}
@@ -798,9 +857,10 @@ export default function Predictions({
 
                         <KnockoutPickControl
                           match={match}
-                          teams={selectableTeams}
+                          teams={teamsLocked ? [] : knockoutQualifiedTeams}
                           pick={knockoutPred}
                           locked={locked}
+                          teamsLocked={teamsLocked}
                           onTeamChange={updateKnockoutPick}
                           onScoreChange={updateKnockoutScore}
                           onSave={saveKnockoutPrediction}
@@ -1031,6 +1091,7 @@ function KnockoutPickControl({
   teams,
   pick,
   locked,
+  teamsLocked,
   onTeamChange,
   onScoreChange,
   onSave,
@@ -1039,6 +1100,7 @@ function KnockoutPickControl({
   teams: Team[];
   pick?: Partial<KnockoutPrediction>;
   locked: boolean;
+  teamsLocked: boolean;
   onTeamChange: (matchId: string, side: 'home' | 'away', teamId: string) => void;
   onScoreChange: (matchId: string, side: 'home' | 'away', value: string) => void;
   onSave: (match: Match) => void;
@@ -1054,21 +1116,39 @@ function KnockoutPickControl({
 
   return (
     <div className="grid sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto] items-end gap-2">
-      <TeamSelect
-        label="Equipo 1"
-        value={pick?.predicted_home_team_id || ''}
-        teams={teams}
-        locked={locked}
-        onChange={(teamId) => onTeamChange(match.id, 'home', teamId)}
-      />
+      {teamsLocked ? (
+        <FixedKnockoutTeamBox
+          label="Cruce real"
+          name={pick?.predicted_home_team_name || match.home_team_name}
+          code={pick?.predicted_home_team_code || match.home_team_code}
+          complete={Boolean(pick?.predicted_home_team_id)}
+        />
+      ) : (
+        <TeamSelect
+          label="Equipo 1"
+          value={pick?.predicted_home_team_id || ''}
+          teams={teams}
+          locked={locked}
+          onChange={(teamId) => onTeamChange(match.id, 'home', teamId)}
+        />
+      )}
       <span className="hidden sm:block text-brand-gold/40 font-black text-[10px]">VS</span>
-      <TeamSelect
-        label="Equipo 2"
-        value={pick?.predicted_away_team_id || ''}
-        teams={teams}
-        locked={locked}
-        onChange={(teamId) => onTeamChange(match.id, 'away', teamId)}
-      />
+      {teamsLocked ? (
+        <FixedKnockoutTeamBox
+          label="Cruce real"
+          name={pick?.predicted_away_team_name || match.away_team_name}
+          code={pick?.predicted_away_team_code || match.away_team_code}
+          complete={Boolean(pick?.predicted_away_team_id)}
+        />
+      ) : (
+        <TeamSelect
+          label="Equipo 2"
+          value={pick?.predicted_away_team_id || ''}
+          teams={teams}
+          locked={locked}
+          onChange={(teamId) => onTeamChange(match.id, 'away', teamId)}
+        />
+      )}
       <div className="flex items-end justify-center gap-1.5 sm:pb-0">
         <label className="space-y-1">
           <span className="block text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">Goles 1</span>
@@ -1103,6 +1183,18 @@ function KnockoutPickControl({
       >
         Guardar
       </button>
+    </div>
+  );
+}
+
+function FixedKnockoutTeamBox({ label, name, code, complete }: { label: string; name: string; code: string | null; complete: boolean }) {
+  return (
+    <div className="space-y-1">
+      <span className="text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">{label}</span>
+      <div className={`flex min-h-10 items-center gap-2 rounded-lg border px-3 py-2 text-xs font-black uppercase ${complete ? 'border-brand-gold/25 bg-black/30 text-white' : 'border-amber-400/25 bg-amber-400/10 text-amber-100'}`}>
+        <Flag code={code} name={name} />
+        <span className="min-w-0 truncate">{complete ? displayTeam(name, code) : 'Pendiente FIFA'}</span>
+      </div>
     </div>
   );
 }
