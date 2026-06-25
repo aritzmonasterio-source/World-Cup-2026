@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
-import { AlertCircle, CheckCircle2, ChevronLeft, Clock, Eye, FileDown, Loader2, Lock, Medal, Save, ShieldAlert, Target, Trophy, Tv } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronLeft, Clock, Eye, FileDown, Loader2, Lock, Medal, ShieldAlert, Target, Trophy, Tv } from 'lucide-react';
 import { motion } from 'motion/react';
 import { canPlay, isAdmin, supabase } from '../lib/supabase';
 import type { CommunitySettings, FinalistPrediction, KnockoutPrediction, Match, MatchPrediction, PointEvent, Profile, ScorerPrediction, Team } from '../lib/types';
@@ -437,16 +437,7 @@ export default function Predictions({
       [matchId]: nextPick,
     }));
     persistDraft({ knockoutPredictions: { [matchId]: nextPick } });
-    if (
-      match &&
-      nextPick.predicted_home_team_id &&
-      nextPick.predicted_away_team_id &&
-      nextPick.predicted_home_team_id !== nextPick.predicted_away_team_id &&
-      nextPick.predicted_home_score !== undefined &&
-      nextPick.predicted_home_score !== null &&
-      nextPick.predicted_away_score !== undefined &&
-      nextPick.predicted_away_score !== null
-    ) {
+    if (match) {
       scheduleAutoSave(`ko-${matchId}`, () => saveKnockoutPrediction(match, nextPick));
     }
   };
@@ -467,30 +458,21 @@ export default function Predictions({
       [matchId]: nextPick,
     }));
     persistDraft({ knockoutPredictions: { [matchId]: nextPick } });
-    if (
-      nextPick.predicted_home_team_id &&
-      nextPick.predicted_away_team_id &&
-      nextPick.predicted_home_team_id !== nextPick.predicted_away_team_id &&
-      nextPick.predicted_home_score !== undefined &&
-      nextPick.predicted_home_score !== null &&
-      nextPick.predicted_away_score !== undefined &&
-      nextPick.predicted_away_score !== null
-    ) {
-      scheduleAutoSave(`ko-${matchId}`, () => saveKnockoutPrediction(match, nextPick));
-    }
+    scheduleAutoSave(`ko-${matchId}`, () => saveKnockoutPrediction(match, nextPick));
   };
 
   const saveKnockoutPrediction = async (match: Match, override?: Partial<KnockoutPrediction>) => {
     if (!user) return setShowAuth(true);
     if (!canEdit || isDeadlineClosed(knockoutDeadlineIso)) return;
     const pred = getKnockoutPredictionBase(match, override || knockoutPredictions[match.id]);
-    if (!pred?.predicted_home_team_id || !pred?.predicted_away_team_id || pred.predicted_home_team_id === pred.predicted_away_team_id) return;
-    if (
-      pred.predicted_home_score === undefined ||
-      pred.predicted_home_score === null ||
-      pred.predicted_away_score === undefined ||
-      pred.predicted_away_score === null
-    ) return;
+    if (pred?.predicted_home_team_id && pred?.predicted_away_team_id && pred.predicted_home_team_id === pred.predicted_away_team_id) return;
+    const hasAnyValue = Boolean(
+      pred?.predicted_home_team_id ||
+      pred?.predicted_away_team_id ||
+      (pred?.predicted_home_score !== undefined && pred?.predicted_home_score !== null) ||
+      (pred?.predicted_away_score !== undefined && pred?.predicted_away_score !== null),
+    );
+    if (!hasAnyValue) return;
 
     setSavingId(`ko-${match.id}`);
     const updatedAt = pred.updated_at || new Date().toISOString();
@@ -809,7 +791,6 @@ export default function Predictions({
             locked={!canEdit || isDeadlineClosed(knockoutDeadlineIso)}
             saving={savingId === 'finalists'}
             onChange={updateFinalistPick}
-            onSave={() => saveFinalists()}
           />
         )}
 
@@ -868,7 +849,6 @@ export default function Predictions({
                           teamsLocked={teamsLocked}
                           onTeamChange={updateKnockoutPick}
                           onScoreChange={updateKnockoutScore}
-                          onSave={saveKnockoutPrediction}
                         />
 
                         <div className="flex items-center justify-end gap-2">
@@ -1019,14 +999,12 @@ function FinalistsPanel({
   locked,
   saving,
   onChange,
-  onSave,
 }: {
   teams: Team[];
   pick: Partial<FinalistPrediction> | null;
   locked: boolean;
   saving: boolean;
   onChange: (slot: FinalistSlot, teamId: string) => void;
-  onSave: () => void;
 }) {
   const slots: { slot: FinalistSlot; label: string; value?: string | null; name?: string | null; code?: string | null }[] = [
     { slot: 'champion', label: 'Campeón', value: pick?.champion_team_id, name: pick?.champion_team_name, code: pick?.champion_team_code },
@@ -1048,9 +1026,7 @@ function FinalistsPanel({
             Elige las cuatro selecciones que acabarán 1ª, 2ª, 3ª y 4ª entre todas las participantes. Puesto exacto: {POINTS.finalistExactPosition} pts. Acertar selección dentro del Top 4 sin puesto exacto: {POINTS.finalistQualified} pts.
           </p>
         </div>
-        <button onClick={onSave} disabled={locked || !complete} className="dimension-button-primary px-5 flex items-center justify-center gap-2 disabled:opacity-40">
-          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Guardar
-        </button>
+        <AutoSaveStateBadge saving={saving} complete={complete} locked={locked} />
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {slots.map((item) => (
@@ -1101,7 +1077,6 @@ function KnockoutPickControl({
   teamsLocked,
   onTeamChange,
   onScoreChange,
-  onSave,
 }: {
   match: Match;
   teams: Team[];
@@ -1110,7 +1085,6 @@ function KnockoutPickControl({
   teamsLocked: boolean;
   onTeamChange: (matchId: string, side: 'home' | 'away', teamId: string) => void;
   onScoreChange: (matchId: string, side: 'home' | 'away', value: string) => void;
-  onSave: (match: Match) => void;
 }) {
   const valid =
     pick?.predicted_home_team_id &&
@@ -1122,7 +1096,7 @@ function KnockoutPickControl({
     pick.predicted_away_score !== null;
 
   return (
-    <div className="grid sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto] items-end gap-2">
+    <div className="grid sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] items-end gap-2">
       {teamsLocked ? (
         <FixedKnockoutTeamBox
           label="Cruce real"
@@ -1164,7 +1138,6 @@ function KnockoutPickControl({
             min="0"
             value={pick?.predicted_home_score ?? ''}
             onChange={(event) => onScoreChange(match.id, 'home', event.target.value)}
-            onBlur={() => onSave(match)}
             disabled={locked}
             className="w-12 h-10 bg-black/40 border border-brand-gold/30 rounded-lg text-center text-sm font-black focus:border-brand-gold outline-none disabled:opacity-40"
           />
@@ -1177,19 +1150,41 @@ function KnockoutPickControl({
             min="0"
             value={pick?.predicted_away_score ?? ''}
             onChange={(event) => onScoreChange(match.id, 'away', event.target.value)}
-            onBlur={() => onSave(match)}
             disabled={locked}
             className="w-12 h-10 bg-black/40 border border-brand-gold/30 rounded-lg text-center text-sm font-black focus:border-brand-gold outline-none disabled:opacity-40"
           />
         </label>
       </div>
-      <button
-        onClick={() => onSave(match)}
-        disabled={locked || !valid}
-        className="rounded-lg bg-brand-gold text-black h-10 px-4 text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
-      >
-        Guardar
-      </button>
+      <div className={`flex h-10 items-center justify-center rounded-lg border px-3 text-[9px] font-black uppercase tracking-widest ${valid ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200' : 'border-white/10 bg-white/[0.03] text-brand-zinc-500'}`}>
+        {valid ? <CheckCircle2 className="w-4 h-4" /> : 'Auto'}
+      </div>
+    </div>
+  );
+}
+
+function AutoSaveStateBadge({ saving, complete, locked }: { saving: boolean; complete: boolean; locked: boolean }) {
+  if (saving) {
+    return (
+      <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-emerald-200">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        Guardando
+      </div>
+    );
+  }
+
+  if (complete) {
+    return (
+      <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-emerald-200">
+        <CheckCircle2 className="w-3.5 h-3.5" />
+        Guardado
+      </div>
+    );
+  }
+
+  return (
+    <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[10px] font-black uppercase tracking-widest ${locked ? 'border-white/10 text-brand-zinc-500' : 'border-amber-400/30 bg-amber-400/10 text-amber-100'}`}>
+      {locked ? <Lock className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
+      {locked ? 'Cerrado' : 'Autoguardado'}
     </div>
   );
 }
