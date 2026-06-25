@@ -211,7 +211,7 @@ export default function Dashboard({
             <RuleItem points={POINTS.scorerGoal} label="Gol de tu goleador" text="Cada gol oficial de tu jugador elegido suma puntos." />
             <RuleItem points={POINTS.groupExactPosition} label="Puesto exacto de grupo" text="Cada equipo situado en su puesto final exacto suma." />
             <RuleItem points={POINTS.groupQualified} label="Clasificado acertado" text="Si un equipo entra en puestos de clasificación, aunque falle el puesto exacto, suma." />
-            <RuleItem points={POINTS.knockoutTeam} label="Equipo en eliminatoria" text="Cada equipo acertado suma si el cruce previsto coincide con el real." />
+            <RuleItem points={POINTS.knockoutTeam} label="Equipo en eliminatoria" text="Cada equipo acertado suma si el cruce previsto coincide con el real. El marcador también puntúa con 15 exacto o 8 por signo solo en ese caso." />
             <RuleItem points={POINTS.finalistExactPosition} label="Puesto exacto finalista" text="Aciertas campeón, segundo, tercero o cuarto en su puesto exacto." />
             <RuleItem points={POINTS.finalistQualified} label="Finalista acertado" text="Aciertas una de las cuatro selecciones finales, aunque falle el puesto." />
           </ul>

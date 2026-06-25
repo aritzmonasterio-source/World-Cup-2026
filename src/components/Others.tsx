@@ -315,12 +315,23 @@ function KnockoutRows({ predictions, matchById }: { predictions: KnockoutPredict
     <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
       {sortPredictions(predictions, matchById).map((prediction) => {
         const match = matchById.get(prediction.match_id);
+        const hasScore = prediction.predicted_home_score !== undefined &&
+          prediction.predicted_home_score !== null &&
+          prediction.predicted_away_score !== undefined &&
+          prediction.predicted_away_score !== null;
         return (
           <div key={prediction.match_id} className="rounded-xl border border-white/5 bg-white/[0.03] p-3 text-xs">
             <p className="mb-1 truncate text-brand-zinc-500">{match ? matchLabel(match) : prediction.match_id}</p>
-            <p className="font-black uppercase text-brand-zinc-200">
-              {displayTeam(prediction.predicted_home_team_name || 'Por definir', prediction.predicted_home_team_code)} vs {displayTeam(prediction.predicted_away_team_name || 'Por definir', prediction.predicted_away_team_code)}
-            </p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="font-black uppercase text-brand-zinc-200">
+                {displayTeam(prediction.predicted_home_team_name || 'Por definir', prediction.predicted_home_team_code)} vs {displayTeam(prediction.predicted_away_team_name || 'Por definir', prediction.predicted_away_team_code)}
+              </p>
+              {hasScore && (
+                <span className="rounded-lg border border-brand-gold/20 bg-brand-gold/10 px-2 py-1 font-mono font-black text-brand-gold tabular-nums">
+                  {prediction.predicted_home_score} - {prediction.predicted_away_score}
+                </span>
+              )}
+            </div>
           </div>
         );
       })}

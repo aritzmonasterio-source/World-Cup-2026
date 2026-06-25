@@ -15,7 +15,7 @@ export const FIFA_MATCHES_URL =
 
 export const DIMENSION_LOGO_URL = dimensionLogo;
 export const GROUP_DEADLINE_ISO = '2026-06-11T18:30:00.000Z'; // 11 Jun 2026 20:30 Europe/Madrid
-export const KNOCKOUT_DEADLINE_ISO = '2026-06-28T08:00:00.000Z'; // 28 Jun 2026 10:00 Europe/Madrid
+export const KNOCKOUT_DEADLINE_ISO = '2026-06-28T18:59:00.000Z'; // 28 Jun 2026 20:59 Europe/Madrid
 
 export const POINTS = {
   exactScore: 15,

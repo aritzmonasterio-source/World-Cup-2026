@@ -834,7 +834,9 @@ function sortPointEvents(events: PointEvent[], eventDates: PointEventDateMap) {
 }
 
 function getPointEventTimestamp(event: PointEvent, eventDates: PointEventDateMap) {
-  const eventDate = event.ref_type === 'match' ? eventDates.get(event.ref_id) : event.created_at;
+  const eventDate = event.ref_type === 'match' || event.ref_type === 'knockout_score'
+    ? eventDates.get(event.ref_id)
+    : event.created_at;
   const timestamp = Date.parse(eventDate || '');
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
@@ -858,6 +860,7 @@ function getPointCategoryLabel(category: PointEvent['category']) {
 
 function getFallbackPointLabel(event: PointEvent) {
   if (event.ref_type === 'match') return 'Pronóstico de partido acertado';
+  if (event.ref_type === 'knockout_score') return 'Marcador de eliminatoria acertado';
   if (event.ref_type === 'group_position') return 'Puesto exacto de grupo';
   if (event.ref_type === 'group_qualified') return 'Clasificado de grupo acertado';
   if (event.ref_type === 'scorer') return 'Gol del goleador elegido';

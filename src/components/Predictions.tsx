@@ -290,7 +290,11 @@ export default function Predictions({
   const pointEventsByMatch = useMemo(() => {
     const grouped: Record<string, PointEvent[]> = {};
     pointEvents.forEach((event) => {
-      const matchId = event.ref_type === 'match' ? event.ref_id : event.ref_type === 'knockout_match' ? event.ref_id.split(':')[0] : '';
+      const matchId = event.ref_type === 'match' || event.ref_type === 'knockout_score'
+        ? event.ref_id
+        : event.ref_type === 'knockout_match'
+          ? event.ref_id.split(':')[0]
+          : '';
       if (!matchId) return;
       if (!grouped[matchId]) grouped[matchId] = [];
       grouped[matchId].push(event);
@@ -353,11 +357,35 @@ export default function Predictions({
     setTimeout(() => setSaveStatus('idle'), 2200);
   };
 
+  const getKnockoutPredictionBase = (match: Match, current?: Partial<KnockoutPrediction>) => ({
+    ...current,
+    match_id: match.id,
+    predicted_home_team_id: current?.predicted_home_team_id ?? match.home_team_id ?? null,
+    predicted_home_team_name: current?.predicted_home_team_name ?? match.home_team_name ?? null,
+    predicted_home_team_code: current?.predicted_home_team_code ?? match.home_team_code ?? null,
+    predicted_away_team_id: current?.predicted_away_team_id ?? match.away_team_id ?? null,
+    predicted_away_team_name: current?.predicted_away_team_name ?? match.away_team_name ?? null,
+    predicted_away_team_code: current?.predicted_away_team_code ?? match.away_team_code ?? null,
+  });
+
+  const isKnockoutPickComplete = (pick?: Partial<KnockoutPrediction>) => (
+    Boolean(
+      pick?.predicted_home_team_id &&
+      pick?.predicted_away_team_id &&
+      pick.predicted_home_team_id !== pick.predicted_away_team_id &&
+      pick.predicted_home_score !== undefined &&
+      pick.predicted_home_score !== null &&
+      pick.predicted_away_score !== undefined &&
+      pick.predicted_away_score !== null,
+    )
+  );
+
   const updateKnockoutPick = (matchId: string, side: 'home' | 'away', teamId: string) => {
     const team = teams.find((item) => item.id === teamId);
+    const match = matches.find((item) => item.id === matchId);
     const updatedAt = new Date().toISOString();
     const nextPick = {
-      ...knockoutPredictions[matchId],
+      ...(match ? getKnockoutPredictionBase(match, knockoutPredictions[matchId]) : knockoutPredictions[matchId]),
       match_id: matchId,
       [`predicted_${side}_team_id`]: team?.id || null,
       [`predicted_${side}_team_name`]: team?.name || null,
@@ -369,8 +397,28 @@ export default function Predictions({
       [matchId]: nextPick,
     }));
     persistDraft({ knockoutPredictions: { [matchId]: nextPick } });
-    const match = matches.find((item) => item.id === matchId);
     if (match && nextPick.predicted_home_team_id && nextPick.predicted_away_team_id && nextPick.predicted_home_team_id !== nextPick.predicted_away_team_id) {
+      scheduleAutoSave(`ko-${matchId}`, () => saveKnockoutPrediction(match, nextPick));
+    }
+  };
+
+  const updateKnockoutScore = (matchId: string, side: 'home' | 'away', value: string) => {
+    const score = value === '' ? null : Number(value);
+    if (score !== null && (!Number.isInteger(score) || score < 0 || score > 30)) return;
+    const match = matches.find((item) => item.id === matchId);
+    if (!match) return;
+    const updatedAt = new Date().toISOString();
+    const nextPick = {
+      ...getKnockoutPredictionBase(match, knockoutPredictions[matchId]),
+      [side === 'home' ? 'predicted_home_score' : 'predicted_away_score']: score,
+      updated_at: updatedAt,
+    };
+    setKnockoutPredictions((prev) => ({
+      ...prev,
+      [matchId]: nextPick,
+    }));
+    persistDraft({ knockoutPredictions: { [matchId]: nextPick } });
+    if (nextPick.predicted_home_team_id && nextPick.predicted_away_team_id && nextPick.predicted_home_team_id !== nextPick.predicted_away_team_id) {
       scheduleAutoSave(`ko-${matchId}`, () => saveKnockoutPrediction(match, nextPick));
     }
   };
@@ -378,7 +426,7 @@ export default function Predictions({
   const saveKnockoutPrediction = async (match: Match, override?: Partial<KnockoutPrediction>) => {
     if (!user) return setShowAuth(true);
     if (!canEdit || isDeadlineClosed(knockoutDeadlineIso)) return;
-    const pred = override || knockoutPredictions[match.id];
+    const pred = getKnockoutPredictionBase(match, override || knockoutPredictions[match.id]);
     if (!pred?.predicted_home_team_id || !pred?.predicted_away_team_id || pred.predicted_home_team_id === pred.predicted_away_team_id) return;
 
     setSavingId(`ko-${match.id}`);
@@ -393,6 +441,8 @@ export default function Predictions({
       predicted_away_team_id: pred.predicted_away_team_id,
       predicted_away_team_name: pred.predicted_away_team_name,
       predicted_away_team_code: pred.predicted_away_team_code,
+      predicted_home_score: pred.predicted_home_score ?? null,
+      predicted_away_score: pred.predicted_away_score ?? null,
       updated_at: updatedAt,
     }, { onConflict: 'user_id,community_id,match_id' });
 
@@ -601,7 +651,7 @@ export default function Predictions({
       <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <PhaseButton active={activeFilter === 'groups'} onClick={() => setActiveFilter('groups')} title="1. Partidos fase 1" date={formatDateTime(groupDeadlineIso)} status={groupsComplete ? 'Completo' : `${completedGroupPredictionCount}/${groupMatches.length || 72}`} />
         <PhaseButton active={activeFilter === 'scorers'} onClick={() => setActiveFilter('scorers')} title="2. Goleadores" date={formatDateTime(scorerDeadlineIso)} status={scorerComplete ? 'Elegido' : 'Pendiente'} />
-        <PhaseButton active={activeFilter === 'knockout'} onClick={() => setActiveFilter('knockout')} title="3. Fase eliminatoria" date={formatDateTime(knockoutDeadlineIso)} status="Cuadro" />
+        <PhaseButton active={activeFilter === 'knockout'} onClick={() => setActiveFilter('knockout')} title="3. Fase eliminatoria" date={formatDateTime(knockoutDeadlineIso)} status="Equipos + marcador" />
       </section>
 
       {activeFilter === 'groups' && (
@@ -702,7 +752,7 @@ export default function Predictions({
 
         {activeFilter === 'knockout' && (
           <div className="rounded-2xl border border-brand-gold/20 bg-brand-gold/5 p-5 text-sm text-brand-zinc-300">
-            <span className="font-black uppercase tracking-widest text-brand-gold">Eliminatorias:</span> los dieciseisavos se rellenan con los cruces reales confirmados. Desde octavos hasta la final haces tu previsión manual antes del {formatDateTime(knockoutDeadlineIso)}.
+            <span className="font-black uppercase tracking-widest text-brand-gold">Eliminatorias:</span> elige los equipos y el marcador de cada cruce, desde dieciseisavos hasta la final. Puntúa el marcador solo si el enfrentamiento previsto coincide con el cruce real. Cierre: {formatDateTime(knockoutDeadlineIso)}.
           </div>
         )}
 
@@ -714,11 +764,11 @@ export default function Predictions({
                 <div className="grid gap-2">
                 {phaseMatches.map((match) => {
                   const pred = matchPredictions[match.id];
-                  const knockoutPred = knockoutPredictions[match.id];
                   const isKnockout = isKnockoutFixture(match);
+                  const knockoutPred = isKnockout ? getKnockoutPredictionBase(match, knockoutPredictions[match.id]) : knockoutPredictions[match.id];
                   const locked = !canEdit || (isKnockout ? isDeadlineClosed(knockoutDeadlineIso) : isPredictionMatchLocked(match));
                   const marketClosed = isPredictionMatchLocked(match);
-                  const knockoutSaved = knockoutPred?.predicted_home_team_id && knockoutPred?.predicted_away_team_id && knockoutPred.predicted_home_team_id !== knockoutPred.predicted_away_team_id;
+                  const knockoutSaved = isKnockoutPickComplete(knockoutPred);
                   const matchPointEvents = getMatchPointEvents(match.id);
 
                   if (isKnockout) {
@@ -728,7 +778,7 @@ export default function Predictions({
                         initial={{ opacity: 0, y: 8 }}
                         whileInView={{ opacity: 1, y: 0 }}
                         viewport={{ once: true }}
-                        className={`grid grid-cols-1 lg:grid-cols-[150px_1fr_1.4fr_110px] items-center gap-4 p-4 rounded-xl border transition-all ${locked ? 'bg-white/[0.02] border-white/5' : 'bg-white/5 border-white/10 hover:border-brand-gold/30'}`}
+                        className={`grid grid-cols-1 lg:grid-cols-[150px_minmax(210px,1fr)_minmax(360px,1.5fr)_110px] items-center gap-4 p-4 rounded-xl border transition-all ${locked ? 'bg-white/[0.02] border-white/5' : 'bg-white/5 border-white/10 hover:border-brand-gold/30'}`}
                       >
                         <div className="text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">
                           <Clock className="w-3 h-3 inline mr-1 text-brand-gold" />
@@ -746,20 +796,15 @@ export default function Predictions({
                           <FixtureTeams match={match} />
                         </div>
 
-                        {(match.round_number || 0) === 4 ? (
-                          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs text-brand-zinc-400">
-                            Cruce real: se completará automáticamente cuando FIFA confirme los equipos.
-                          </div>
-                        ) : (
-                          <KnockoutPickControl
-                            match={match}
-                            teams={selectableTeams}
-                            pick={knockoutPred}
-                            locked={locked}
-                            onChange={updateKnockoutPick}
-                            onSave={saveKnockoutPrediction}
-                          />
-                        )}
+                        <KnockoutPickControl
+                          match={match}
+                          teams={selectableTeams}
+                          pick={knockoutPred}
+                          locked={locked}
+                          onTeamChange={updateKnockoutPick}
+                          onScoreChange={updateKnockoutScore}
+                          onSave={saveKnockoutPrediction}
+                        />
 
                         <div className="flex items-center justify-end gap-2">
                           {user && approved && <MatchPointsBadge match={match} events={matchPointEvents} />}
@@ -986,26 +1031,35 @@ function KnockoutPickControl({
   teams,
   pick,
   locked,
-  onChange,
+  onTeamChange,
+  onScoreChange,
   onSave,
 }: {
   match: Match;
   teams: Team[];
   pick?: Partial<KnockoutPrediction>;
   locked: boolean;
-  onChange: (matchId: string, side: 'home' | 'away', teamId: string) => void;
+  onTeamChange: (matchId: string, side: 'home' | 'away', teamId: string) => void;
+  onScoreChange: (matchId: string, side: 'home' | 'away', value: string) => void;
   onSave: (match: Match) => void;
 }) {
-  const valid = pick?.predicted_home_team_id && pick?.predicted_away_team_id && pick.predicted_home_team_id !== pick.predicted_away_team_id;
+  const valid =
+    pick?.predicted_home_team_id &&
+    pick?.predicted_away_team_id &&
+    pick.predicted_home_team_id !== pick.predicted_away_team_id &&
+    pick.predicted_home_score !== undefined &&
+    pick.predicted_home_score !== null &&
+    pick.predicted_away_score !== undefined &&
+    pick.predicted_away_score !== null;
 
   return (
-    <div className="grid sm:grid-cols-[1fr_auto_1fr_auto] items-center gap-2">
+    <div className="grid sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto] items-end gap-2">
       <TeamSelect
         label="Equipo 1"
         value={pick?.predicted_home_team_id || ''}
         teams={teams}
         locked={locked}
-        onChange={(teamId) => onChange(match.id, 'home', teamId)}
+        onChange={(teamId) => onTeamChange(match.id, 'home', teamId)}
       />
       <span className="hidden sm:block text-brand-gold/40 font-black text-[10px]">VS</span>
       <TeamSelect
@@ -1013,8 +1067,35 @@ function KnockoutPickControl({
         value={pick?.predicted_away_team_id || ''}
         teams={teams}
         locked={locked}
-        onChange={(teamId) => onChange(match.id, 'away', teamId)}
+        onChange={(teamId) => onTeamChange(match.id, 'away', teamId)}
       />
+      <div className="flex items-end justify-center gap-1.5 sm:pb-0">
+        <label className="space-y-1">
+          <span className="block text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">Goles 1</span>
+          <input
+            type="number"
+            min="0"
+            value={pick?.predicted_home_score ?? ''}
+            onChange={(event) => onScoreChange(match.id, 'home', event.target.value)}
+            onBlur={() => onSave(match)}
+            disabled={locked}
+            className="w-12 h-10 bg-black/40 border border-brand-gold/30 rounded-lg text-center text-sm font-black focus:border-brand-gold outline-none disabled:opacity-40"
+          />
+        </label>
+        <span className="pb-3 text-brand-gold/40 font-black text-xs">-</span>
+        <label className="space-y-1">
+          <span className="block text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">Goles 2</span>
+          <input
+            type="number"
+            min="0"
+            value={pick?.predicted_away_score ?? ''}
+            onChange={(event) => onScoreChange(match.id, 'away', event.target.value)}
+            onBlur={() => onSave(match)}
+            disabled={locked}
+            className="w-12 h-10 bg-black/40 border border-brand-gold/30 rounded-lg text-center text-sm font-black focus:border-brand-gold outline-none disabled:opacity-40"
+          />
+        </label>
+      </div>
       <button
         onClick={() => onSave(match)}
         disabled={locked || !valid}

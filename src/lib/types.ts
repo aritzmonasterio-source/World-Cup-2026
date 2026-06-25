@@ -115,6 +115,8 @@ export interface KnockoutPrediction {
   predicted_away_team_id: string | null;
   predicted_away_team_name: string | null;
   predicted_away_team_code: string | null;
+  predicted_home_score?: number | null;
+  predicted_away_score?: number | null;
   points_awarded?: number;
   updated_at?: string;
 }

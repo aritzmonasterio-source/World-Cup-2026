@@ -10,7 +10,7 @@
 6. Default deadlines are enforced in the application and can be overridden by admins through `community_settings`:
    - Groups and classified teams: 11 June 2026, 20:30 Europe/Madrid by default.
    - Scorer: independent deadline, defaulting to the group deadline unless overridden.
-   - Full knockout bracket: 28 June 2026, 10:00 Europe/Madrid by default.
+   - Full knockout bracket: 28 June 2026, 20:59 Europe/Madrid by default.
 7. Individual exceptions live in `community_memberships.prediction_unlocks` and must be scoped to the selected community.
 8. Prediction visibility is owner/admin before closure; social reveal views must only show closed markets, including admin reopen windows.
 
