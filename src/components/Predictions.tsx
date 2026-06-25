@@ -291,6 +291,11 @@ export default function Predictions({
     return [...realQualified.values()].sort((a, b) => displayTeam(a.name, a.code).localeCompare(displayTeam(b.name, b.code), 'es'));
   }, [matches, teams]);
 
+  const selectableTeams = useMemo(
+    () => [...teams].sort((a, b) => displayTeam(a.name, a.code).localeCompare(displayTeam(b.name, b.code), 'es')),
+    [teams],
+  );
+
   const groupMatches = useMemo(
     () => matches.filter((match) => !isKnockoutFixture(match) && match.group_code),
     [matches],
@@ -511,7 +516,7 @@ export default function Predictions({
   };
 
   const updateFinalistPick = (slot: FinalistSlot, teamId: string) => {
-    const team = knockoutQualifiedTeams.find((item) => item.id === teamId) || teams.find((item) => item.id === teamId);
+    const team = selectableTeams.find((item) => item.id === teamId) || teams.find((item) => item.id === teamId);
     const updatedAt = new Date().toISOString();
     const nextPick = {
       ...finalistPrediction,
@@ -799,7 +804,7 @@ export default function Predictions({
       {activeFilter !== 'scorers' && <section className="space-y-6">
         {activeFilter === 'knockout' && (
           <FinalistsPanel
-            teams={knockoutQualifiedTeams}
+            teams={selectableTeams}
             pick={finalistPrediction}
             locked={!canEdit || isDeadlineClosed(knockoutDeadlineIso)}
             saving={savingId === 'finalists'}
@@ -1023,11 +1028,11 @@ function FinalistsPanel({
   onChange: (slot: FinalistSlot, teamId: string) => void;
   onSave: () => void;
 }) {
-  const slots: { slot: FinalistSlot; label: string; value?: string | null }[] = [
-    { slot: 'champion', label: 'Campeón', value: pick?.champion_team_id },
-    { slot: 'runner_up', label: 'Segundo', value: pick?.runner_up_team_id },
-    { slot: 'third', label: 'Tercero', value: pick?.third_team_id },
-    { slot: 'fourth', label: 'Cuarto', value: pick?.fourth_team_id },
+  const slots: { slot: FinalistSlot; label: string; value?: string | null; name?: string | null; code?: string | null }[] = [
+    { slot: 'champion', label: 'Campeón', value: pick?.champion_team_id, name: pick?.champion_team_name, code: pick?.champion_team_code },
+    { slot: 'runner_up', label: 'Segundo', value: pick?.runner_up_team_id, name: pick?.runner_up_team_name, code: pick?.runner_up_team_code },
+    { slot: 'third', label: 'Tercero', value: pick?.third_team_id, name: pick?.third_team_name, code: pick?.third_team_code },
+    { slot: 'fourth', label: 'Cuarto', value: pick?.fourth_team_id, name: pick?.fourth_team_name, code: pick?.fourth_team_code },
   ];
   const selectedIds = slots.map((item) => item.value).filter(Boolean);
   const complete = selectedIds.length === 4 && new Set(selectedIds).size === 4;
@@ -1037,10 +1042,10 @@ function FinalistsPanel({
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
           <h2 className="text-lg font-black uppercase tracking-tighter italic flex items-center gap-3">
-            <Medal className="w-5 h-5 text-brand-gold" /> Finalistas
+            <Medal className="w-5 h-5 text-brand-gold" /> Top 4 final
           </h2>
           <p className="mt-1 text-sm text-brand-zinc-400">
-            Elige tus cuatro selecciones finales. Puesto exacto: {POINTS.finalistExactPosition} pts. Acertar finalista sin puesto exacto: {POINTS.finalistQualified} pts.
+            Elige las cuatro selecciones que acabarán 1ª, 2ª, 3ª y 4ª entre todas las participantes. Puesto exacto: {POINTS.finalistExactPosition} pts. Acertar selección dentro del Top 4 sin puesto exacto: {POINTS.finalistQualified} pts.
           </p>
         </div>
         <button onClick={onSave} disabled={locked || !complete} className="dimension-button-primary px-5 flex items-center justify-center gap-2 disabled:opacity-40">
@@ -1055,6 +1060,8 @@ function FinalistsPanel({
             value={item.value || ''}
             teams={teams}
             locked={locked}
+            selectedName={item.name}
+            selectedCode={item.code}
             onChange={(teamId) => onChange(item.slot, teamId)}
           />
         ))}
@@ -1199,8 +1206,26 @@ function FixedKnockoutTeamBox({ label, name, code, complete }: { label: string; 
   );
 }
 
-function TeamSelect({ label, value, teams, locked, onChange }: { label: string; value: string; teams: Team[]; locked: boolean; onChange: (teamId: string) => void }) {
+function TeamSelect({
+  label,
+  value,
+  teams,
+  locked,
+  selectedName,
+  selectedCode,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  teams: Team[];
+  locked: boolean;
+  selectedName?: string | null;
+  selectedCode?: string | null;
+  onChange: (teamId: string) => void;
+}) {
   const selectedTeam = teams.find((team) => team.id === value);
+  const displayedName = selectedTeam?.name || selectedName || '';
+  const displayedCode = selectedTeam?.code || selectedCode || null;
 
   return (
     <label className="space-y-1">
@@ -1214,10 +1239,10 @@ function TeamSelect({ label, value, teams, locked, onChange }: { label: string; 
         <option value="">{teams.length ? 'Selecciona equipo' : 'Sin equipos'}</option>
         {teams.map((team) => <option key={team.id} value={team.id}>{displayTeam(team.name, team.code)}</option>)}
       </select>
-      {selectedTeam && (
-        <span className="flex items-center gap-2 rounded-lg border border-white/5 bg-white/[0.03] px-2 py-1 text-[10px] font-black uppercase text-brand-zinc-300">
-          <Flag code={selectedTeam.code} name={selectedTeam.name} />
-          <span className="truncate">{displayTeam(selectedTeam.name, selectedTeam.code)}</span>
+      {value && displayedName && (
+        <span className="flex items-center gap-2 rounded-lg border border-brand-gold/15 bg-brand-gold/[0.06] px-2 py-1 text-[10px] font-black uppercase text-brand-zinc-200">
+          <Flag code={displayedCode} name={displayedName} />
+          <span className="truncate">{displayTeam(displayedName, displayedCode)}</span>
         </span>
       )}
     </label>
