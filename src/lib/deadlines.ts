@@ -1,5 +1,5 @@
 import type { CommunitySettings, Match, PredictionPhase, PredictionUnlocks } from './types';
-import { GROUP_DEADLINE_ISO, KNOCKOUT_DEADLINE_ISO } from './constants';
+import { GROUP_DEADLINE_ISO, KNOCKOUT_DEADLINE_ISO, KNOCKOUT_LATE_DEADLINE_ISO } from './constants';
 
 const UNLOCK_KEY: Record<PredictionPhase, keyof PredictionUnlocks> = {
   groups: 'groups_until',
@@ -34,8 +34,34 @@ export function getPhaseDeadline(
   return isoOrFallback(Math.max(parseTime(base), parseTime(manualUnlock)), base);
 }
 
+export function getLateKnockoutDeadline(
+  settings?: CommunitySettings | null,
+  unlocks?: PredictionUnlocks | null,
+) {
+  const manualUnlock = unlocks?.knockout_until;
+  const configuredDeadline = settings?.knockout_deadline_at;
+  return isoOrFallback(
+    Math.max(parseTime(KNOCKOUT_LATE_DEADLINE_ISO), parseTime(configuredDeadline), parseTime(manualUnlock)),
+    KNOCKOUT_LATE_DEADLINE_ISO,
+  );
+}
+
+function isRoundOf32DeadlineMatch(match: Partial<Pick<Match, 'round_number' | 'phase' | 'stage_name'>>) {
+  const stageText = `${match.phase || ''} ${match.stage_name || ''}`
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+  return (
+    (match.round_number || 0) === 4 ||
+    stageText.includes('dieciseis') ||
+    stageText.includes('round of 32') ||
+    stageText.includes('ronda de 32')
+  );
+}
+
 export function getMatchDeadline(
-  match: Pick<Match, 'round_number' | 'phase'>,
+  match: Pick<Match, 'round_number' | 'phase'> & Partial<Pick<Match, 'stage_name'>>,
   settings?: CommunitySettings | null,
   unlocks?: PredictionUnlocks | null,
 ) {
@@ -45,7 +71,10 @@ export function getMatchDeadline(
     phase.includes('grupo') ||
     phase.includes('group');
 
-  return getPhaseDeadline(isGroup ? 'groups' : 'knockout', settings, unlocks);
+  if (isGroup) return getPhaseDeadline('groups', settings, unlocks);
+  if (isRoundOf32DeadlineMatch(match)) return getPhaseDeadline('knockout', settings, unlocks);
+
+  return getLateKnockoutDeadline(settings, unlocks);
 }
 
 export function isDeadlineClosed(deadlineIso: string, now = new Date()) {
