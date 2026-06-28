@@ -118,17 +118,17 @@ function isRoundOf32Fixture(match: Match) {
 }
 
 const KNOCKOUT_PREDECESSORS: Record<number, [number, number]> = {
-  89: [73, 75],
-  90: [74, 77],
-  91: [76, 78],
-  92: [79, 80],
-  93: [83, 84],
-  94: [81, 82],
+  89: [74, 77],
+  90: [73, 75],
+  91: [83, 84],
+  92: [81, 82],
+  93: [76, 78],
+  94: [79, 80],
   95: [86, 88],
   96: [85, 87],
   97: [89, 90],
-  98: [93, 94],
-  99: [91, 92],
+  98: [91, 92],
+  99: [93, 94],
   100: [95, 96],
   101: [97, 98],
   102: [99, 100],
@@ -957,19 +957,22 @@ export default function Predictions({
                           <div className="text-[10px] font-black uppercase tracking-[0.16em] text-brand-gold">
                             Partido {match.match_number || '-'} • {match.phase}
                           </div>
-                          <FixtureTeams match={match} />
+                          {teamsLocked && <FixtureTeams match={match} />}
                         </div>
 
-                        <KnockoutPickControl
-                          match={match}
-                          homeTeams={teamsLocked ? [] : optionBranches.homeTeams}
-                          awayTeams={teamsLocked ? [] : optionBranches.awayTeams}
-                          pick={knockoutPred}
-                          locked={locked}
-                          teamsLocked={teamsLocked}
-                          onTeamChange={updateKnockoutPick}
-                          onScoreChange={updateKnockoutScore}
-                        />
+                        <div className="space-y-2">
+                          <KnockoutPickControl
+                            match={match}
+                            homeTeams={teamsLocked ? [] : optionBranches.homeTeams}
+                            awayTeams={teamsLocked ? [] : optionBranches.awayTeams}
+                            pick={knockoutPred}
+                            locked={locked}
+                            teamsLocked={teamsLocked}
+                            onTeamChange={updateKnockoutPick}
+                            onScoreChange={updateKnockoutScore}
+                          />
+                          {user && approved && <KnockoutPairStatus match={match} pick={knockoutPred} />}
+                        </div>
 
                         <div className="flex items-center justify-end gap-2">
                           {user && approved && <MatchPointsBadge match={match} events={matchPointEvents} />}
@@ -1071,6 +1074,37 @@ function MatchPointsBadge({ match, events }: { match: Match; events: PointEvent[
       }`}
     >
       {positive ? `+${total}` : '0'} pts
+    </div>
+  );
+}
+
+function KnockoutPairStatus({ match, pick }: { match: Match; pick?: Partial<KnockoutPrediction> }) {
+  if (match.status !== 'finished') return null;
+
+  const hasActualPair = Boolean(match.home_team_id && match.away_team_id);
+  const hasPredictedPair = Boolean(pick?.predicted_home_team_id && pick?.predicted_away_team_id);
+  if (!hasActualPair || !hasPredictedPair) {
+    return (
+      <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">
+        Cruce sin comparar
+      </div>
+    );
+  }
+
+  const pairMatched = (
+    (pick?.predicted_home_team_id === match.home_team_id && pick?.predicted_away_team_id === match.away_team_id) ||
+    (pick?.predicted_home_team_id === match.away_team_id && pick?.predicted_away_team_id === match.home_team_id)
+  );
+
+  return (
+    <div className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-[9px] font-black uppercase tracking-widest ${
+      pairMatched
+        ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'
+        : 'border-red-400/30 bg-red-500/10 text-red-200'
+    }`}
+    >
+      {pairMatched ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
+      {pairMatched ? 'Cruce acertado · marcador válido' : 'Cruce fallado · marcador no puntúa'}
     </div>
   );
 }
@@ -1347,6 +1381,7 @@ function TeamSelect({
   const selectedTeam = teams.find((team) => team.id === value);
   const displayedName = selectedTeam?.name || selectedName || '';
   const displayedCode = selectedTeam?.code || selectedCode || null;
+  const valueOutsideOptions = Boolean(value && !selectedTeam);
 
   return (
     <label className="space-y-1">
@@ -1358,12 +1393,20 @@ function TeamSelect({
         className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs font-bold outline-none focus:border-brand-gold disabled:opacity-40"
       >
         <option value="">{teams.length ? 'Selecciona equipo' : 'Sin equipos'}</option>
+        {valueOutsideOptions && displayedName && (
+          <option value={value} disabled>{displayTeam(displayedName, displayedCode)} · fuera de rama</option>
+        )}
         {teams.map((team) => <option key={team.id} value={team.id}>{displayTeam(team.name, team.code)}</option>)}
       </select>
       {value && displayedName && (
-        <span className="flex items-center gap-2 rounded-lg border border-brand-gold/15 bg-brand-gold/[0.06] px-2 py-1 text-[10px] font-black uppercase text-brand-zinc-200">
+        <span className={`flex items-center gap-2 rounded-lg border px-2 py-1 text-[10px] font-black uppercase ${
+          valueOutsideOptions
+            ? 'border-amber-400/25 bg-amber-400/10 text-amber-100'
+            : 'border-brand-gold/15 bg-brand-gold/[0.06] text-brand-zinc-200'
+        }`}
+        >
           <Flag code={displayedCode} name={displayedName} />
-          <span className="truncate">{displayTeam(displayedName, displayedCode)}</span>
+          <span className="truncate">{displayTeam(displayedName, displayedCode)}{valueOutsideOptions ? ' · fuera de rama' : ''}</span>
         </span>
       )}
     </label>
