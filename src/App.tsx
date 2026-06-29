@@ -13,11 +13,27 @@ import { canPlay, isAdmin, isSupabaseConfigured, profileStatusLabel, supabase } 
 import { COMMUNITIES, DEFAULT_COMMUNITY_ID, NEUTRAL_THEME, WORLD_CUP_LOGO_URL, getCommunity, getCommunityThemeStyle, type CommunityId } from './lib/communities';
 import type { CommunityMembership, Profile } from './lib/types';
 
+const APP_TABS = ['dashboard', 'predictions', 'ranking', 'scores', 'others', 'admin'] as const;
+type AppTab = typeof APP_TABS[number];
+
+function readStoredTab(): AppTab {
+  const stored = window.localStorage.getItem('wc26_active_tab') as AppTab | null;
+  return stored && APP_TABS.includes(stored) ? stored : 'dashboard';
+}
+
+function scrollStorageKey(communityId: CommunityId, tab: AppTab) {
+  return `wc26_scroll:${communityId}:${tab}`;
+}
+
+function saveScrollPosition(communityId: CommunityId, tab: AppTab) {
+  window.localStorage.setItem(scrollStorageKey(communityId, tab), String(window.scrollY || 0));
+}
+
 export default function App() {
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState<AppTab>(() => readStoredTab());
   const [showAuth, setShowAuth] = useState(false);
   const [authRecoveryMode, setAuthRecoveryMode] = useState(false);
   const [memberships, setMemberships] = useState<CommunityMembership[]>([]);
@@ -42,10 +58,18 @@ export default function App() {
   }, [admin, selectableMemberships, selectedCommunity, user]);
   const communitySelectorLocked = Boolean(user && !admin && visibleCommunities.length <= 1);
 
+  const changeTab = (tab: string) => {
+    const nextTab = APP_TABS.includes(tab as AppTab) ? tab as AppTab : 'dashboard';
+    saveScrollPosition(selectedCommunityId, activeTab);
+    window.localStorage.setItem('wc26_active_tab', nextTab);
+    setActiveTab(nextTab);
+  };
+
   const changeCommunity = (communityId: CommunityId) => {
     if (user && !admin && !selectableMemberships.some((membership) => membership.community_id === communityId)) {
       return;
     }
+    saveScrollPosition(selectedCommunityId, activeTab);
     window.localStorage.setItem('wc26_selected_community', communityId);
     setSelectedCommunityId(communityId);
   };
@@ -61,6 +85,58 @@ export default function App() {
     const themeMeta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
     themeMeta?.setAttribute('content', activeTheme.colors.bg);
   }, [activeTheme]);
+
+  useEffect(() => {
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual';
+    }
+
+    const key = scrollStorageKey(selectedCommunityId, activeTab);
+    let frame = 0;
+
+    const restore = () => {
+      const saved = Number(window.localStorage.getItem(key) || '0');
+      if (!Number.isFinite(saved) || saved <= 0) {
+        window.scrollTo({ top: 0, behavior: 'auto' });
+        return;
+      }
+      window.requestAnimationFrame(() => {
+        window.setTimeout(() => window.scrollTo({ top: saved, behavior: 'auto' }), 0);
+      });
+    };
+
+    const save = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        window.localStorage.setItem(key, String(window.scrollY || 0));
+      });
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        save();
+      } else {
+        restore();
+      }
+    };
+
+    const restoreTimer = window.setTimeout(restore, 100);
+    const lateRestoreTimer = window.setTimeout(restore, 450);
+    window.addEventListener('scroll', save, { passive: true });
+    window.addEventListener('pagehide', save);
+    window.addEventListener('pageshow', restore);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      window.clearTimeout(restoreTimer);
+      window.clearTimeout(lateRestoreTimer);
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', save);
+      window.removeEventListener('pagehide', save);
+      window.removeEventListener('pageshow', restore);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [activeTab, selectedCommunityId]);
 
   useEffect(() => {
     let mounted = true;
@@ -199,7 +275,7 @@ export default function App() {
     <div className="min-h-screen min-h-dvh overflow-x-hidden pb-28 sm:pb-24 bg-brand-gray" style={getCommunityThemeStyle(activeTheme)}>
       <header className="fixed top-0 w-full bg-brand-gray/95 backdrop-blur-xl border-b border-brand-gold/10 z-40 pt-[env(safe-area-inset-top)]">
         <div className="max-w-6xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
-          <button onClick={() => setActiveTab('dashboard')} aria-label="Ir a Inicio" className="flex items-center gap-4 text-left">
+          <button onClick={() => changeTab('dashboard')} aria-label="Ir a Inicio" className="flex items-center gap-4 text-left">
             <div className={`h-10 w-10 sm:h-14 sm:w-14 rounded-xl border border-brand-gold/20 flex items-center justify-center overflow-hidden shadow-[0_0_30px_rgba(174,156,80,0.2)] ${showingNeutralWorldLogo ? 'bg-white/90 p-1.5' : 'bg-black/20'}`}>
               {activeTheme.logoUrl ? (
                 <img src={activeTheme.logoUrl} alt={activeTheme.name} className="h-full w-auto object-contain" />
@@ -243,7 +319,7 @@ export default function App() {
 
             {user && admin && (
               <button
-                onClick={() => setActiveTab('admin')}
+                onClick={() => changeTab('admin')}
                 className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-2 text-[9px] font-black uppercase tracking-widest transition-all sm:px-3 ${
                   activeTab === 'admin'
                     ? 'border-brand-gold bg-brand-gold text-black'
@@ -301,7 +377,7 @@ export default function App() {
         {activeTab !== 'dashboard' && (
           <button
             type="button"
-            onClick={() => setActiveTab('dashboard')}
+            onClick={() => changeTab('dashboard')}
             className="mb-5 inline-flex items-center gap-2 rounded-full border border-brand-gold/20 bg-brand-gold/10 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-brand-gold hover:border-brand-gold/50 transition-all"
           >
             <LayoutDashboard className="h-3.5 w-3.5" />
@@ -317,7 +393,7 @@ export default function App() {
             exit={{ opacity: 0, x: -10 }}
             transition={{ duration: 0.2 }}
           >
-            {activeTab === 'dashboard' && <Dashboard user={user} profile={profile} community={user ? selectedCommunity : NEUTRAL_THEME} communityId={selectedCommunityId} setActiveTab={setActiveTab} setShowAuth={setShowAuth} />}
+            {activeTab === 'dashboard' && <Dashboard user={user} profile={profile} community={user ? selectedCommunity : NEUTRAL_THEME} communityId={selectedCommunityId} setActiveTab={changeTab} setShowAuth={setShowAuth} />}
             {activeTab === 'predictions' && <Predictions user={user} profile={profile} communityId={selectedCommunityId} setShowAuth={setShowAuth} />}
             {activeTab === 'ranking' && <Ranking user={user} profile={profile} communityId={selectedCommunityId} />}
             {activeTab === 'scores' && <Scores />}
@@ -338,7 +414,7 @@ export default function App() {
           {tabs.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => changeTab(tab.id)}
               className={`flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-center transition-all relative ${
                 activeTab === tab.id ? 'text-brand-gold' : 'text-brand-zinc-500 hover:text-white'
               }`}

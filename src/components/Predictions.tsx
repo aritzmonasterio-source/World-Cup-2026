@@ -14,6 +14,7 @@ type MatchPredictionMap = Record<string, Partial<MatchPrediction>>;
 type KnockoutPredictionMap = Record<string, Partial<KnockoutPrediction>>;
 type FinalistSlot = 'champion' | 'runner_up' | 'third' | 'fourth';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+type PredictionFilter = 'groups' | 'scorers' | 'knockout';
 type PredictionDraft = {
   matchPredictions?: MatchPredictionMap;
   knockoutPredictions?: KnockoutPredictionMap;
@@ -47,6 +48,23 @@ async function fetchPublicCalendarFallback() {
 
 function predictionDraftKey(userId: string, communityId: CommunityId) {
   return `wc26_prediction_draft:${userId}:${communityId}`;
+}
+
+function predictionFilterKey(communityId: CommunityId) {
+  return `wc26_prediction_filter:${communityId}`;
+}
+
+function readPredictionFilter(communityId: CommunityId): PredictionFilter {
+  const stored = window.localStorage.getItem(predictionFilterKey(communityId)) as PredictionFilter | null;
+  return stored === 'groups' || stored === 'scorers' || stored === 'knockout' ? stored : 'groups';
+}
+
+function phaseDomId(phase: string) {
+  return `fase-${phase
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')}`;
 }
 
 function readPredictionDraft(userId: string, communityId: CommunityId): PredictionDraft {
@@ -221,7 +239,7 @@ export default function Predictions({
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
-  const [activeFilter, setActiveFilter] = useState<'groups' | 'scorers' | 'knockout'>('groups');
+  const [activeFilter, setActiveFilter] = useState<PredictionFilter>(() => readPredictionFilter(communityId));
   const [scorerName, setScorerName] = useState('');
   const [scorerTeamId, setScorerTeamId] = useState('');
   const autoSaveTimers = useRef<Record<string, number>>({});
@@ -235,6 +253,15 @@ export default function Predictions({
     const phase = match.phase?.toLowerCase() || '';
     return (match.round_number || 0) >= 4 || (!match.group_code && !phase.includes('group') && !phase.includes('grupo'));
   };
+
+  const changeFilter = (filter: PredictionFilter) => {
+    window.localStorage.setItem(predictionFilterKey(communityId), filter);
+    setActiveFilter(filter);
+  };
+
+  useEffect(() => {
+    setActiveFilter(readPredictionFilter(communityId));
+  }, [communityId]);
 
   useEffect(() => {
     async function fetchData() {
@@ -809,9 +836,9 @@ export default function Predictions({
       )}
 
       <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <PhaseButton active={activeFilter === 'groups'} onClick={() => setActiveFilter('groups')} title="1. Partidos fase 1" date={formatDateTime(groupDeadlineIso)} status={groupsComplete ? 'Completo' : `${completedGroupPredictionCount}/${groupMatches.length || 72}`} />
-        <PhaseButton active={activeFilter === 'scorers'} onClick={() => setActiveFilter('scorers')} title="2. Goleadores" date={formatDateTime(scorerDeadlineIso)} status={scorerComplete ? 'Elegido' : 'Pendiente'} />
-        <PhaseButton active={activeFilter === 'knockout'} onClick={() => setActiveFilter('knockout')} title="3. Fase eliminatoria" date={`16º ${formatDateTime(knockoutDeadlineIso)} · resto ${formatDateTime(lateKnockoutDeadlineIso)}`} status="Equipos + marcador" />
+        <PhaseButton active={activeFilter === 'groups'} onClick={() => changeFilter('groups')} title="1. Partidos fase 1" date={formatDateTime(groupDeadlineIso)} status={groupsComplete ? 'Completo' : `${completedGroupPredictionCount}/${groupMatches.length || 72}`} />
+        <PhaseButton active={activeFilter === 'scorers'} onClick={() => changeFilter('scorers')} title="2. Goleadores" date={formatDateTime(scorerDeadlineIso)} status={scorerComplete ? 'Elegido' : 'Pendiente'} />
+        <PhaseButton active={activeFilter === 'knockout'} onClick={() => changeFilter('knockout')} title="3. Fase eliminatoria" date={`16º ${formatDateTime(knockoutDeadlineIso)} · resto ${formatDateTime(lateKnockoutDeadlineIso)}`} status="Equipos + marcador" />
       </section>
 
       {activeFilter === 'groups' && (
@@ -915,9 +942,11 @@ export default function Predictions({
           </div>
         )}
 
+        {activeFilter === 'knockout' && <KnockoutPhaseJumps phases={Object.keys(matchesByPhase)} />}
+
         <div className="space-y-16">
           {Object.entries(matchesByPhase).map(([phase, phaseMatches]) => (
-            <div key={phase} className="space-y-4">
+            <div key={phase} id={activeFilter === 'knockout' ? phaseDomId(phase) : undefined} className="scroll-mt-28 space-y-4">
               <h3 className="text-xl font-black uppercase tracking-[0.2em] italic text-white">{phase}</h3>
               <div className={phase.startsWith('Grupo ') ? 'grid gap-4 md:grid-cols-[minmax(0,1fr)_320px]' : 'grid gap-2'}>
                 <div className="grid gap-2">
@@ -1147,6 +1176,42 @@ function PhaseButton({ active, onClick, title, date, status }: { active: boolean
   );
 }
 
+function shortPhaseLabel(phase: string) {
+  const normalized = normalizeStageText(phase);
+  if (normalized.includes('dieciseis')) return '16º';
+  if (normalized.includes('octavos')) return '8º';
+  if (normalized.includes('cuartos')) return '4º';
+  if (normalized.includes('semifinal')) return 'Semis';
+  if (normalized.includes('tercer')) return '3º';
+  if (normalized.includes('final')) return 'Final';
+  return phase;
+}
+
+function KnockoutPhaseJumps({ phases }: { phases: string[] }) {
+  if (phases.length <= 1) return null;
+
+  const jumpToPhase = (phase: string) => {
+    document.getElementById(phaseDomId(phase))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  return (
+    <div className="sticky top-[calc(4.5rem+env(safe-area-inset-top))] z-30 -mx-1 overflow-x-auto rounded-2xl border border-white/10 bg-brand-gray/95 p-2 shadow-2xl shadow-black/30 backdrop-blur-xl sm:top-[calc(6rem+env(safe-area-inset-top))]">
+      <div className="flex min-w-max gap-2">
+        {phases.map((phase) => (
+          <button
+            key={phase}
+            type="button"
+            onClick={() => jumpToPhase(phase)}
+            className="rounded-xl border border-brand-gold/20 bg-brand-gold/10 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-brand-gold active:scale-95"
+          >
+            {shortPhaseLabel(phase)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function FinalistsPanel({
   teams,
   pick,
@@ -1252,45 +1317,48 @@ function KnockoutPickControl({
     pick.predicted_away_score !== null;
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_auto] items-end gap-2">
-      {teamsLocked ? (
-        <FixedKnockoutTeamBox
-          label="Cruce real"
-          name={pick?.predicted_home_team_name || match.home_team_name}
-          code={pick?.predicted_home_team_code || match.home_team_code}
-          complete={Boolean(pick?.predicted_home_team_id)}
-        />
-      ) : (
-        <TeamSelect
-          label="Equipo 1"
-          value={pick?.predicted_home_team_id || ''}
-          teams={homeTeams}
-          locked={locked}
-          selectedName={pick?.predicted_home_team_name}
-          selectedCode={pick?.predicted_home_team_code}
-          onChange={(teamId) => onTeamChange(match.id, 'home', teamId)}
-        />
-      )}
-      <span className="self-center pb-6 text-brand-gold/40 font-black text-[10px]">VS</span>
-      {teamsLocked ? (
-        <FixedKnockoutTeamBox
-          label="Cruce real"
-          name={pick?.predicted_away_team_name || match.away_team_name}
-          code={pick?.predicted_away_team_code || match.away_team_code}
-          complete={Boolean(pick?.predicted_away_team_id)}
-        />
-      ) : (
-        <TeamSelect
-          label="Equipo 2"
-          value={pick?.predicted_away_team_id || ''}
-          teams={awayTeams}
-          locked={locked}
-          selectedName={pick?.predicted_away_team_name}
-          selectedCode={pick?.predicted_away_team_code}
-          onChange={(teamId) => onTeamChange(match.id, 'away', teamId)}
-        />
-      )}
-      <div className="col-span-3 sm:col-span-1 flex items-end justify-center gap-1.5 sm:pb-0">
+    <div className="space-y-3">
+      <div className="grid grid-cols-[minmax(0,1fr)_2rem_minmax(0,1fr)] items-stretch gap-2">
+        {teamsLocked ? (
+          <FixedKnockoutTeamBox
+            label="Cruce real"
+            name={pick?.predicted_home_team_name || match.home_team_name}
+            code={pick?.predicted_home_team_code || match.home_team_code}
+            complete={Boolean(pick?.predicted_home_team_id)}
+          />
+        ) : (
+          <TeamSelect
+            label="Equipo 1"
+            value={pick?.predicted_home_team_id || ''}
+            teams={homeTeams}
+            locked={locked}
+            selectedName={pick?.predicted_home_team_name}
+            selectedCode={pick?.predicted_home_team_code}
+            onChange={(teamId) => onTeamChange(match.id, 'home', teamId)}
+          />
+        )}
+        <span className="flex min-h-[7.25rem] items-center justify-center rounded-lg border border-brand-gold/10 bg-black/20 text-[10px] font-black text-brand-gold/50">VS</span>
+        {teamsLocked ? (
+          <FixedKnockoutTeamBox
+            label="Cruce real"
+            name={pick?.predicted_away_team_name || match.away_team_name}
+            code={pick?.predicted_away_team_code || match.away_team_code}
+            complete={Boolean(pick?.predicted_away_team_id)}
+          />
+        ) : (
+          <TeamSelect
+            label="Equipo 2"
+            value={pick?.predicted_away_team_id || ''}
+            teams={awayTeams}
+            locked={locked}
+            selectedName={pick?.predicted_away_team_name}
+            selectedCode={pick?.predicted_away_team_code}
+            onChange={(teamId) => onTeamChange(match.id, 'away', teamId)}
+          />
+        )}
+      </div>
+
+      <div className="flex items-end justify-center gap-2">
         <label className="space-y-1">
           <span className="block text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">Goles 1</span>
           <input
@@ -1299,7 +1367,7 @@ function KnockoutPickControl({
             value={pick?.predicted_home_score ?? ''}
             onChange={(event) => onScoreChange(match.id, 'home', event.target.value)}
             disabled={locked}
-            className="w-12 h-10 bg-black/40 border border-brand-gold/30 rounded-lg text-center text-sm font-black focus:border-brand-gold outline-none disabled:opacity-40"
+            className="w-14 h-11 bg-black/40 border border-brand-gold/30 rounded-lg text-center text-base sm:text-sm font-black focus:border-brand-gold outline-none disabled:opacity-40"
           />
         </label>
         <span className="pb-3 text-brand-gold/40 font-black text-xs">-</span>
@@ -1311,11 +1379,11 @@ function KnockoutPickControl({
             value={pick?.predicted_away_score ?? ''}
             onChange={(event) => onScoreChange(match.id, 'away', event.target.value)}
             disabled={locked}
-            className="w-12 h-10 bg-black/40 border border-brand-gold/30 rounded-lg text-center text-sm font-black focus:border-brand-gold outline-none disabled:opacity-40"
+            className="w-14 h-11 bg-black/40 border border-brand-gold/30 rounded-lg text-center text-base sm:text-sm font-black focus:border-brand-gold outline-none disabled:opacity-40"
           />
         </label>
       </div>
-      <div className={`col-span-3 sm:col-span-1 flex h-10 items-center justify-center rounded-lg border px-3 text-[9px] font-black uppercase tracking-widest ${valid ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200' : 'border-white/10 bg-white/[0.03] text-brand-zinc-500'}`}>
+      <div className={`flex h-10 items-center justify-center rounded-lg border px-3 text-[9px] font-black uppercase tracking-widest ${valid ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200' : 'border-white/10 bg-white/[0.03] text-brand-zinc-500'}`}>
         {valid ? <CheckCircle2 className="w-4 h-4" /> : 'Auto'}
       </div>
     </div>
@@ -1351,11 +1419,11 @@ function AutoSaveStateBadge({ saving, complete, locked }: { saving: boolean; com
 
 function FixedKnockoutTeamBox({ label, name, code, complete }: { label: string; name: string; code: string | null; complete: boolean }) {
   return (
-    <div className="space-y-1">
-      <span className="text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">{label}</span>
-      <div className={`flex min-h-10 items-center gap-2 rounded-lg border px-3 py-2 text-xs font-black uppercase ${complete ? 'border-brand-gold/25 bg-black/30 text-white' : 'border-amber-400/25 bg-amber-400/10 text-amber-100'}`}>
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">{label}</span>
+      <div className={`flex min-h-[5.75rem] flex-col items-start justify-center gap-2 rounded-lg border px-2 py-2 text-[10px] sm:text-xs font-black uppercase ${complete ? 'border-brand-gold/25 bg-black/30 text-white' : 'border-amber-400/25 bg-amber-400/10 text-amber-100'}`}>
         <Flag code={code} name={name} />
-        <span className="min-w-0 truncate">{complete ? displayTeam(name, code) : 'Pendiente FIFA'}</span>
+        <span className="min-w-0 leading-tight break-words">{complete ? displayTeam(name, code) : 'Pendiente FIFA'}</span>
       </div>
     </div>
   );
@@ -1384,13 +1452,13 @@ function TeamSelect({
   const valueOutsideOptions = Boolean(value && !selectedTeam);
 
   return (
-    <label className="space-y-1">
-      <span className="text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">{label}</span>
+    <label className="flex min-w-0 flex-col gap-1">
+      <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
         disabled={locked || teams.length === 0}
-        className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs font-bold outline-none focus:border-brand-gold disabled:opacity-40"
+        className="min-h-11 w-full rounded-lg border border-white/10 bg-black/40 px-2 py-2 text-base sm:text-xs font-bold outline-none focus:border-brand-gold disabled:opacity-40"
       >
         <option value="">{teams.length ? 'Selecciona equipo' : 'Sin equipos'}</option>
         {valueOutsideOptions && displayedName && (
@@ -1399,7 +1467,7 @@ function TeamSelect({
         {teams.map((team) => <option key={team.id} value={team.id}>{displayTeam(team.name, team.code)}</option>)}
       </select>
       {value && displayedName && (
-        <span className={`flex items-center gap-2 rounded-lg border px-2 py-1 text-[10px] font-black uppercase ${
+        <span className={`flex min-h-[2.75rem] items-center gap-2 rounded-lg border px-2 py-1 text-[10px] font-black uppercase ${
           valueOutsideOptions
             ? 'border-amber-400/25 bg-amber-400/10 text-amber-100'
             : 'border-brand-gold/15 bg-brand-gold/[0.06] text-brand-zinc-200'
