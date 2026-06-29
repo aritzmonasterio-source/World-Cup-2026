@@ -45,9 +45,9 @@ create table if not exists public.community_settings (
   entry_fee_eur numeric(8,2) not null default 0,
   prize_distribution jsonb not null default jsonb_build_object(
     'phase1Champion', 10,
-    'phase2Champion', 5,
+    'phase2Champion', 0,
     'globalChampion', 50,
-    'globalRunnerUp', 20,
+    'globalRunnerUp', 25,
     'globalThird', 15
   ),
   notes text null,

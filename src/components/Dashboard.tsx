@@ -240,9 +240,8 @@ export default function Dashboard({
               {settings.notes ? ` ${settings.notes}` : ''}
             </p>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
             <PrizeBadge label="1ª fase" value={settings.prize_distribution.phase1Champion} />
-            <PrizeBadge label="2ª fase" value={settings.prize_distribution.phase2Champion} />
             <PrizeBadge label="Global" value={settings.prize_distribution.globalChampion} />
             <PrizeBadge label="Segundo" value={settings.prize_distribution.globalRunnerUp} />
             <PrizeBadge label="Tercero" value={settings.prize_distribution.globalThird} />

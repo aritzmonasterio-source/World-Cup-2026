@@ -71,9 +71,9 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
       entry_fee_eur: 0,
       prize_distribution: {
         phase1Champion: 10,
-        phase2Champion: 5,
+        phase2Champion: 0,
         globalChampion: 50,
-        globalRunnerUp: 20,
+        globalRunnerUp: 25,
         globalThird: 15,
       },
       groups_deadline_at: null,
@@ -127,7 +127,11 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
       community_id: communityId,
       bizum_recipient: nextSettings.bizum_recipient || 'Aritz',
       entry_fee_eur: Number(nextSettings.entry_fee_eur) || 0,
-      prize_distribution: nextSettings.prize_distribution,
+      prize_distribution: {
+        ...nextSettings.prize_distribution,
+        phase2Champion: 0,
+        globalRunnerUp: nextSettings.prize_distribution.globalRunnerUp || 25,
+      },
       groups_deadline_at: nextSettings.groups_deadline_at || null,
       scorer_deadline_at: nextSettings.scorer_deadline_at || null,
       knockout_deadline_at: nextSettings.knockout_deadline_at || null,
@@ -442,13 +446,13 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
               <span className="text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">Pago por jugador (€)</span>
               <input value={settings.entry_fee_eur} onChange={(event) => setSettings({ ...settings, entry_fee_eur: Number(event.target.value) })} type="number" min="0" className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3" />
             </label>
-            <div className="lg:col-span-2 grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="lg:col-span-2 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <PrizeInput label="Campeón 1ª fase" value={settings.prize_distribution.phase1Champion} onChange={(value) => setSettings({ ...settings, prize_distribution: { ...settings.prize_distribution, phase1Champion: value } })} />
-              <PrizeInput label="Campeón 2ª fase" value={settings.prize_distribution.phase2Champion} onChange={(value) => setSettings({ ...settings, prize_distribution: { ...settings.prize_distribution, phase2Champion: value } })} />
               <PrizeInput label="Campeón global" value={settings.prize_distribution.globalChampion} onChange={(value) => setSettings({ ...settings, prize_distribution: { ...settings.prize_distribution, globalChampion: value } })} />
               <PrizeInput label="Segundo global" value={settings.prize_distribution.globalRunnerUp} onChange={(value) => setSettings({ ...settings, prize_distribution: { ...settings.prize_distribution, globalRunnerUp: value } })} />
               <PrizeInput label="Tercero global" value={settings.prize_distribution.globalThird} onChange={(value) => setSettings({ ...settings, prize_distribution: { ...settings.prize_distribution, globalThird: value } })} />
             </div>
+            <p className="lg:col-span-2 text-xs text-brand-zinc-500">El premio de 2ª fase queda eliminado. Ese 5% pasa al segundo clasificado global.</p>
             <label className="lg:col-span-2 space-y-2">
               <span className="text-[10px] font-black uppercase tracking-widest text-brand-zinc-500">Nota visible para la comunidad</span>
               <textarea value={settings.notes || ''} onChange={(event) => setSettings({ ...settings, notes: event.target.value })} rows={2} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3" placeholder="Ejemplo: antes del inicio, Bizum a Aritz indicando nombre y comunidad." />
