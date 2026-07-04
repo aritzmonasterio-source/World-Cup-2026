@@ -118,7 +118,7 @@ export default function Dashboard({
             <div className="grid sm:grid-cols-2 gap-3 sm:gap-4 mb-6 sm:mb-8">
               <TutorialStep n="1" title="Elige comunidad" text="Selecciona la comunidad en la que quieres jugar o a la que perteneces." />
               <TutorialStep n="2" title="Crea cuenta" text="Regístrate con email y contraseña. Recibirás confirmación por email." />
-              <TutorialStep n="3" title="Completa tus fases" text="Primero grupos y goleador. Después finalistas y cuadro eliminatorio." />
+              <TutorialStep n="3" title="Completa tus fases" text="Primero grupos y goleador. Después, marcadores de eliminatorias con cruces reales." />
               <TutorialStep n="4" title="Sigue el ranking" text="Los puntos se actualizan con resultados, goles y clasificaciones." />
             </div>
             <div className="grid grid-cols-1 sm:flex sm:flex-wrap gap-3">
@@ -211,9 +211,7 @@ export default function Dashboard({
             <RuleItem points={POINTS.scorerGoal} label="Gol de tu goleador" text="Cada gol oficial de tu jugador elegido suma puntos." />
             <RuleItem points={POINTS.groupExactPosition} label="Puesto exacto de grupo" text="Cada equipo situado en su puesto final exacto suma." />
             <RuleItem points={POINTS.groupQualified} label="Clasificado acertado" text="Si un equipo entra en puestos de clasificación, aunque falle el puesto exacto, suma." />
-            <RuleItem points={POINTS.knockoutTeam} label="Equipo en eliminatoria" text="Cada equipo acertado suma si el cruce previsto coincide con el real. El marcador también puntúa con 15 exacto o 8 por signo solo en ese caso." />
-            <RuleItem points={POINTS.finalistExactPosition} label="Puesto exacto finalista" text="Aciertas campeón, segundo, tercero o cuarto en su puesto exacto." />
-            <RuleItem points={POINTS.finalistQualified} label="Finalista acertado" text="Aciertas una de las cuatro selecciones finales, aunque falle el puesto." />
+            <RuleItem points={POINTS.exactScore} label="Eliminatoria exacta" text="En eliminatorias los cruces vienen dados por FIFA y solo cuenta el marcador: exacto o signo." />
           </ul>
         </div>
 
@@ -225,8 +223,8 @@ export default function Dashboard({
           <div className="space-y-4">
             <DeadlineItem icon={CalendarCheck} label="Grupos y clasificados" date={formatDateTime(groupDeadlineIso)} />
             <DeadlineItem icon={Target} label="Goleador" date={formatDateTime(scorerDeadlineIso)} />
-            <DeadlineItem icon={Lock} label="Toda la fase eliminatoria" date={formatDateTime(knockoutDeadlineIso)} />
-            <DeadlineItem icon={Target} label="Cruces por prever" date="Pronostica desde dieciseisavos hasta la final aunque aún sean TBD" />
+            <DeadlineItem icon={Lock} label="Dieciseisavos" date={formatDateTime(knockoutDeadlineIso)} />
+            <DeadlineItem icon={Target} label="Resto de eliminatorias" date="Cada ronda cierra 1 minuto antes de su primer partido" />
           </div>
         </div>
       </section>

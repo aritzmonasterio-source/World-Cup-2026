@@ -5,7 +5,7 @@ import { isAdmin, supabase } from '../lib/supabase';
 import type { CommunityMembership, CommunitySettings, Match, PredictionPhase, Profile, Team } from '../lib/types';
 import { displayTeam } from '../lib/flags';
 import { getCommunity, type CommunityId } from '../lib/communities';
-import { addHoursIso, fromDateTimeLocalValue, getPhaseDeadline, toDateTimeLocalValue } from '../lib/deadlines';
+import { KNOCKOUT_ROUND_UNLOCKS, addHoursIso, fromDateTimeLocalValue, getPhaseDeadline, toDateTimeLocalValue } from '../lib/deadlines';
 import { SCORER_CANDIDATES } from '../lib/scorerCandidates';
 
 type AdminMember = CommunityMembership & { profiles?: Profile };
@@ -79,6 +79,7 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
       groups_deadline_at: null,
       scorer_deadline_at: null,
       knockout_deadline_at: null,
+      knockout_round_unlocks: {},
       notes: '',
     });
   }
@@ -135,6 +136,7 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
       groups_deadline_at: nextSettings.groups_deadline_at || null,
       scorer_deadline_at: nextSettings.scorer_deadline_at || null,
       knockout_deadline_at: nextSettings.knockout_deadline_at || null,
+      knockout_round_unlocks: nextSettings.knockout_round_unlocks || {},
       notes: nextSettings.notes || null,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'community_id' });
@@ -165,6 +167,34 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
     };
     setSettings(nextSettings);
     await persistCommunitySettings(nextSettings, `Cerrado ${phaseLabel(phase)} desde este momento.`);
+  }
+
+  async function extendCommunityKnockoutRound(roundKey: string, label: string, hours = 3) {
+    if (!settings) return;
+    const nextSettings = {
+      ...settings,
+      knockout_round_unlocks: {
+        ...(settings.knockout_round_unlocks || {}),
+        [roundKey]: addHoursIso(hours),
+      },
+    };
+    setSettings(nextSettings);
+    await persistCommunitySettings(
+      nextSettings,
+      `Reabierta la ronda ${label} durante ${hours} horas. Los partidos ya iniciados o jugados seguirán bloqueados.`,
+    );
+  }
+
+  async function closeCommunityKnockoutRound(roundKey: string, label: string) {
+    if (!settings) return;
+    const nextRoundUnlocks = { ...(settings.knockout_round_unlocks || {}) };
+    delete nextRoundUnlocks[roundKey];
+    const nextSettings = {
+      ...settings,
+      knockout_round_unlocks: nextRoundUnlocks,
+    };
+    setSettings(nextSettings);
+    await persistCommunitySettings(nextSettings, `Cerrada la reapertura manual de ${label}.`);
   }
 
   async function resetCommunityDeadlines() {
@@ -414,6 +444,50 @@ export default function Admin({ user, profile, communityId }: { user: User | nul
                 onChange={(value) => updateDeadlineField('knockout', value)}
               />
             </div>
+            <div className="rounded-2xl border border-brand-gold/20 bg-brand-gold/5 p-4">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-brand-gold">Reapertura por ronda eliminatoria</p>
+                  <p className="mt-1 text-xs text-brand-zinc-400">
+                    Úsalo para abrir octavos, cuartos, semifinales, tercer puesto o final de forma temporal. Aunque lo abras, ningún jugador podrá cambiar un partido ya iniciado o finalizado.
+                  </p>
+                </div>
+                <span className="rounded-full border border-white/10 bg-black/20 px-3 py-2 text-[9px] font-black uppercase tracking-widest text-brand-zinc-400">
+                  Candado por partido activo
+                </span>
+              </div>
+              <div className="mt-4 grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                {KNOCKOUT_ROUND_UNLOCKS.map((round) => {
+                  const unlockUntil = settings.knockout_round_unlocks?.[round.key];
+                  return (
+                    <div key={round.key} className="rounded-xl border border-white/10 bg-black/20 p-3">
+                      <p className="text-xs font-black uppercase tracking-tight">{round.label}</p>
+                      <p className="mt-1 min-h-5 text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">
+                        {unlockUntil ? `Abierta hasta ${toDateTimeLocalValue(unlockUntil).replace('T', ' ')}` : 'Sin reapertura'}
+                      </p>
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => extendCommunityKnockoutRound(round.key, round.label, 3)}
+                          disabled={busy === 'settings'}
+                          className="flex-1 rounded-lg border border-brand-gold/20 bg-brand-gold/10 px-2 py-2 text-[9px] font-black uppercase tracking-widest text-brand-gold disabled:opacity-50"
+                        >
+                          Abrir 3h
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => closeCommunityKnockoutRound(round.key, round.label)}
+                          disabled={busy === 'settings' || !unlockUntil}
+                          className="rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-[9px] font-black uppercase tracking-widest text-brand-zinc-400 disabled:opacity-40"
+                        >
+                          Cerrar
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
               <p className="text-xs text-brand-zinc-400">
                 Si editas una fecha manualmente, pulsa guardar. Para una excepción puntual, usa los botones de reapertura en cada usuario.
@@ -655,7 +729,7 @@ function MemberRow({
       <div className="md:col-span-3 flex flex-wrap gap-2 border-t border-white/10 pt-3">
         <button onClick={() => onExtendUnlock(row.user_id, 'scorer', 3)} disabled={busy} className="px-3 py-2 rounded-lg bg-brand-gold/10 text-brand-gold border border-brand-gold/20 text-[10px] font-black uppercase">Goleador +3h</button>
         <button onClick={() => onExtendUnlock(row.user_id, 'groups', 3)} disabled={busy} className="px-3 py-2 rounded-lg bg-white/5 text-brand-zinc-300 border border-white/10 text-[10px] font-black uppercase">Grupos +3h</button>
-        <button onClick={() => onExtendUnlock(row.user_id, 'knockout', 3)} disabled={busy} className="px-3 py-2 rounded-lg bg-white/5 text-brand-zinc-300 border border-white/10 text-[10px] font-black uppercase">KO +3h</button>
+        <button onClick={() => onExtendUnlock(row.user_id, 'knockout', 3)} disabled={busy} title="Solo permite editar eliminatorias no iniciadas" className="px-3 py-2 rounded-lg bg-white/5 text-brand-zinc-300 border border-white/10 text-[10px] font-black uppercase">KO no iniciado +3h</button>
         <button onClick={() => onClearUnlocks(row.user_id)} disabled={busy || !hasUnlocks} className="px-3 py-2 rounded-lg bg-black/20 text-brand-zinc-400 border border-white/10 text-[10px] font-black uppercase disabled:opacity-40">Limpiar</button>
       </div>
     </div>

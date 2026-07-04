@@ -8,6 +8,7 @@ export interface PredictionUnlocks {
   groups_until?: string | null;
   scorer_until?: string | null;
   knockout_until?: string | null;
+  knockout_round_unlocks?: Record<string, string | null> | null;
 }
 
 export interface Profile {
@@ -61,6 +62,7 @@ export interface CommunitySettings {
   groups_deadline_at?: string | null;
   scorer_deadline_at?: string | null;
   knockout_deadline_at?: string | null;
+  knockout_round_unlocks?: Record<string, string | null> | null;
   notes?: string | null;
   updated_at?: string;
 }

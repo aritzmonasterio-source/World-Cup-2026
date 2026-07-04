@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { CalendarClock, ChevronDown, Lock, Target, Trophy, Users } from 'lucide-react';
-import type { CommunityMembership, CommunitySettings, FinalistPrediction, KnockoutPrediction, Match, MatchPrediction, Profile, ScorerPrediction } from '../lib/types';
+import type { CommunityMembership, CommunitySettings, KnockoutPrediction, Match, MatchPrediction, Profile, ScorerPrediction } from '../lib/types';
 import { canPlay, isAdmin, supabase } from '../lib/supabase';
 import { formatDateTime } from '../lib/constants';
 import { getPhaseDeadline } from '../lib/deadlines';
@@ -27,7 +27,6 @@ export default function Others({
   const [matchPredictions, setMatchPredictions] = useState<MatchPrediction[]>([]);
   const [knockoutPredictions, setKnockoutPredictions] = useState<KnockoutPrediction[]>([]);
   const [scorerPredictions, setScorerPredictions] = useState<ScorerPrediction[]>([]);
-  const [finalistPredictions, setFinalistPredictions] = useState<FinalistPrediction[]>([]);
   const [settings, setSettings] = useState<CommunitySettings | null>(null);
 
   const admin = isAdmin(profile, user?.email);
@@ -81,15 +80,10 @@ export default function Others({
       }
 
       if (knockoutOpen) {
-        const [knockoutResult, finalistResult] = await Promise.all([
-          supabase.from('knockout_predictions').select('*').eq('community_id', communityId),
-          supabase.from('finalist_predictions').select('*').eq('community_id', communityId),
-        ]);
+        const knockoutResult = await supabase.from('knockout_predictions').select('*').eq('community_id', communityId);
         setKnockoutPredictions((knockoutResult.data || []) as KnockoutPrediction[]);
-        setFinalistPredictions((finalistResult.data || []) as FinalistPrediction[]);
       } else {
         setKnockoutPredictions([]);
-        setFinalistPredictions([]);
       }
 
       setLoading(false);
@@ -108,7 +102,6 @@ export default function Others({
   );
   const knockoutPredictionsByUser = useMemo(() => groupByUser(knockoutPredictions), [knockoutPredictions]);
   const scorerByUser = useMemo(() => new Map(scorerPredictions.map((prediction) => [prediction.user_id, prediction])), [scorerPredictions]);
-  const finalistByUser = useMemo(() => new Map(finalistPredictions.map((prediction) => [prediction.user_id, prediction])), [finalistPredictions]);
 
   if (!user || !approved) {
     return (
@@ -135,14 +128,14 @@ export default function Others({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <RevealStatus title="Grupos" open={groupsOpen} date={formatDateTime(groupDeadlineIso)} />
           <RevealStatus title="Goleador" open={scorerOpen} date={formatDateTime(scorerDeadlineIso)} />
-          <RevealStatus title="Eliminatoria" open={knockoutOpen} date={formatDateTime(knockoutDeadlineIso)} />
+          <RevealStatus title="Eliminatoria" open={knockoutOpen} date="Por ronda" />
         </div>
       </div>
 
       {!hasAnyOpenSection && (
         <LockedShell
           title="Aún cerrado"
-          text={`Los pronósticos se abren por fases: grupos el ${formatDateTime(groupDeadlineIso)}, goleador el ${formatDateTime(scorerDeadlineIso)} y eliminatoria el ${formatDateTime(knockoutDeadlineIso)}. Hasta entonces cada jugador ve solo lo suyo.`}
+          text={`Los pronósticos se abren por fases: grupos el ${formatDateTime(groupDeadlineIso)}, goleador el ${formatDateTime(scorerDeadlineIso)} y eliminatoria por ronda. Hasta entonces cada jugador ve solo lo suyo.`}
         />
       )}
 
@@ -163,7 +156,6 @@ export default function Others({
               groupPredictions={groupPredictionsByUser[member.user_id] || []}
               knockoutPredictions={knockoutPredictionsByUser[member.user_id] || []}
               scorerPrediction={scorerByUser.get(member.user_id) || null}
-              finalistPrediction={finalistByUser.get(member.user_id) || null}
               matchById={matchById}
             />
           ))}
@@ -180,7 +172,6 @@ function PlayerRevealCard({
   groupPredictions,
   knockoutPredictions,
   scorerPrediction,
-  finalistPrediction,
   matchById,
 }: {
   member: MemberWithProfile;
@@ -189,7 +180,6 @@ function PlayerRevealCard({
   groupPredictions: MatchPrediction[];
   knockoutPredictions: KnockoutPrediction[];
   scorerPrediction: ScorerPrediction | null;
-  finalistPrediction: FinalistPrediction | null;
   matchById: Map<string, Match>;
 }) {
   const playerName = member.profiles?.username || member.profiles?.email || 'Jugador';
@@ -239,9 +229,8 @@ function PlayerRevealCard({
           icon={Trophy}
           locked={!memberKnockoutOpen}
           emptyText="Este jugador aún no tiene pronósticos visibles de eliminatoria."
-          count={knockoutPredictions.length + (finalistPrediction ? 1 : 0)}
+          count={knockoutPredictions.length}
         >
-          {finalistPrediction && <FinalistBlock prediction={finalistPrediction} />}
           <KnockoutRows predictions={knockoutPredictions} matchById={matchById} />
         </PredictionDetails>
       </div>
@@ -315,6 +304,10 @@ function KnockoutRows({ predictions, matchById }: { predictions: KnockoutPredict
     <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
       {sortPredictions(predictions, matchById).map((prediction) => {
         const match = matchById.get(prediction.match_id);
+        const homeName = match?.home_team_name || prediction.predicted_home_team_name || 'Por definir';
+        const homeCode = match?.home_team_code || prediction.predicted_home_team_code;
+        const awayName = match?.away_team_name || prediction.predicted_away_team_name || 'Por definir';
+        const awayCode = match?.away_team_code || prediction.predicted_away_team_code;
         const hasScore = prediction.predicted_home_score !== undefined &&
           prediction.predicted_home_score !== null &&
           prediction.predicted_away_score !== undefined &&
@@ -324,7 +317,7 @@ function KnockoutRows({ predictions, matchById }: { predictions: KnockoutPredict
             <p className="mb-1 truncate text-brand-zinc-500">{match ? matchLabel(match) : prediction.match_id}</p>
             <div className="flex items-center justify-between gap-3">
               <p className="font-black uppercase text-brand-zinc-200">
-                {displayTeam(prediction.predicted_home_team_name || 'Por definir', prediction.predicted_home_team_code)} vs {displayTeam(prediction.predicted_away_team_name || 'Por definir', prediction.predicted_away_team_code)}
+                {displayTeam(homeName, homeCode)} vs {displayTeam(awayName, awayCode)}
               </p>
               {hasScore && (
                 <span className="rounded-lg border border-brand-gold/20 bg-brand-gold/10 px-2 py-1 font-mono font-black text-brand-gold tabular-nums">
@@ -335,29 +328,6 @@ function KnockoutRows({ predictions, matchById }: { predictions: KnockoutPredict
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function FinalistBlock({ prediction }: { prediction: FinalistPrediction }) {
-  const rows = [
-    ['Campeón', prediction.champion_team_name, prediction.champion_team_code],
-    ['Finalista', prediction.runner_up_team_name, prediction.runner_up_team_code],
-    ['3º', prediction.third_team_name, prediction.third_team_code],
-    ['4º', prediction.fourth_team_name, prediction.fourth_team_code],
-  ];
-
-  return (
-    <div className="mb-3 rounded-xl border border-brand-gold/20 bg-brand-gold/10 p-3">
-      <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-brand-gold">Top 4 previsto</p>
-      <div className="grid sm:grid-cols-2 gap-2">
-        {rows.map(([label, name, code]) => (
-          <div key={label || 'slot'} className="rounded-lg bg-black/20 p-2 text-xs">
-            <span className="text-[9px] font-black uppercase tracking-widest text-brand-zinc-500">{label}</span>
-            <p className="mt-1 font-black uppercase">{displayTeam(name || 'Sin elegir', code || null)}</p>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
